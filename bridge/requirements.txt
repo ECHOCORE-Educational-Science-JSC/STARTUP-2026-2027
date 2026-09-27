@@ -1,0 +1,6 @@
+websockets==17.1
+yt-dlp==2026.8.19
+imageio-ffmpeg==0.6.0
+pyserial==3.5
+esptool==5.4.0
+pillow>=10.0.0

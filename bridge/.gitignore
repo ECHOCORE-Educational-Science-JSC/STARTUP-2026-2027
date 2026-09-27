@@ -1,0 +1,12 @@
+.venv/
+__pycache__/
+*.pyc
+.tmp/
+tmp*/
+test-tmp/
+*.wav
+*.log
+.wisio_alert_sender
+.wisio_alert_secret
+bridge_secrets.cmd
+.env

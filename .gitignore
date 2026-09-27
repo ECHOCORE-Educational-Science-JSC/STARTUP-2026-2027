@@ -1,0 +1,40 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments & vendored packages
+.venv/
+venv/
+env/
+bridge/vendor/
+*.egg-info/
+.pytest_cache/
+
+# Firmware build artifacts
+firmware/build/
+firmware/managed_components/
+firmware/dependencies.lock
+firmware/sdkconfig
+firmware/sdkconfig.old
+firmware/.clangd/
+firmware/main/assets/lang_config.h
+firmware/main/mmap_generate_*.h
+firmware/releases/
+firmware/tmp/
+firmware/dist/
+
+# Logs & temp audio
+*.log
+*.wav
+tmp/
+.cache/
+.DS_Store
+Thumbs.db
+
+# Secrets & environment configurations
+.env
+.env.*
+!.env.example
+*.pem
+*.key
