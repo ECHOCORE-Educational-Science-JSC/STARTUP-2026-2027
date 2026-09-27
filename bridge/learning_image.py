@@ -291,17 +291,21 @@ def _pil_make_small_png(source: bytes) -> bytes | None:
         from PIL import Image, ImageOps
         im = Image.open(io.BytesIO(source))
         im = ImageOps.exif_transpose(im)
-        im = im.convert("RGB")
-        im.thumbnail((320, 240), Image.Resampling.LANCZOS)
-        bg = Image.new("RGB", (320, 240), color=(7, 21, 46))
-        offset = ((320 - im.width) // 2, (240 - im.height) // 2)
-        bg.paste(im, offset)
+        if im.mode in ("RGBA", "LA") or (im.mode == "P" and "transparency" in im.info):
+            im_rgba = im.convert("RGBA")
+            fitted = ImageOps.fit(im_rgba, (320, 240), method=Image.Resampling.LANCZOS, centering=(0.5, 0.5))
+            bg = Image.new("RGB", (320, 240), color=(255, 255, 255))
+            bg.paste(fitted, (0, 0), fitted)
+            fitted = bg
+        else:
+            im_rgb = im.convert("RGB")
+            fitted = ImageOps.fit(im_rgb, (320, 240), method=Image.Resampling.LANCZOS, centering=(0.5, 0.5))
         buf = io.BytesIO()
-        bg.save(buf, format="PNG", optimize=True)
+        fitted.save(buf, format="PNG", optimize=True)
         png = buf.getvalue()
         if len(png) > 180 * 1024:
             buf = io.BytesIO()
-            bg.convert("P", palette=Image.Palette.ADAPTIVE, colors=256).save(buf, format="PNG", optimize=True)
+            fitted.convert("P", palette=Image.Palette.ADAPTIVE, colors=256).save(buf, format="PNG", optimize=True)
             png = buf.getvalue()
         if png.startswith(b"\x89PNG\r\n\x1a\n") and len(png) <= MAX_PNG_BYTES:
             return png
@@ -311,7 +315,7 @@ def _pil_make_small_png(source: bytes) -> bytes | None:
 
 
 def make_small_png(source: bytes) -> bytes:
-    """Convert arbitrary web artwork to a small palette PNG for the ESP32 display."""
+    """Convert arbitrary web artwork to a small palette PNG for the ESP32 display (full-bleed 320x240 cover)."""
     pil_result = _pil_make_small_png(source)
     if pil_result is not None:
         return pil_result
@@ -320,8 +324,8 @@ def make_small_png(source: bytes) -> bytes:
         _ffmpeg_executable(), "-hide_banner", "-loglevel", "error",
         "-i", "pipe:0",
         "-vf", (
-            "scale=320:240:force_original_aspect_ratio=decrease:flags=lanczos,"
-            "pad=320:240:(ow-iw)/2:(oh-ih)/2:color=0x07152e,format=rgb24"
+            "scale=320:240:force_original_aspect_ratio=increase:flags=lanczos,"
+            "crop=320:240,format=rgb24"
         ),
         "-frames:v", "1", "-f", "image2pipe", "-vcodec", "png", "pipe:1",
     ]

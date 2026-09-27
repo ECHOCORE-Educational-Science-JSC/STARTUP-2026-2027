@@ -1041,11 +1041,11 @@ void LcdDisplay::SetPreviewImage(std::unique_ptr<LvglImage> image) {
     auto img_dsc = preview_image_cached_->image_dsc();
     lv_image_set_src(preview_image_, img_dsc);
     if (img_dsc->header.w > 0 && img_dsc->header.h > 0) {
-        // Fit the full display without stretching the illustration.
+        // Fit the full display in cover mode so the illustration fills the screen edge-to-edge without black bars.
         lv_obj_set_size(preview_image_, img_dsc->header.w, img_dsc->header.h);
         const auto scale_x = 256 * width_ / img_dsc->header.w;
         const auto scale_y = 256 * height_ / img_dsc->header.h;
-        lv_image_set_scale(preview_image_, scale_x < scale_y ? scale_x : scale_y);
+        lv_image_set_scale(preview_image_, scale_x > scale_y ? scale_x : scale_y);
         lv_obj_center(preview_image_);
         lv_obj_move_foreground(preview_image_);
     }

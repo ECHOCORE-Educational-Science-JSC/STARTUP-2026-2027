@@ -115,6 +115,8 @@ class LearningImageTest(unittest.TestCase):
         png = learning_image.make_small_png(buf.getvalue())
         self.assertTrue(png.startswith(b"\x89PNG\r\n\x1a\n"))
         self.assertLessEqual(len(png), learning_image.MAX_PNG_BYTES)
+        out = Image.open(io.BytesIO(png))
+        self.assertEqual(out.size, (320, 240))
 
 
 

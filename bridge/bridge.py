@@ -139,11 +139,15 @@ SYSTEM_INSTRUCTION = (
     "Do not speak again while the music is playing. When the bridge reports that a song ended naturally, ask "
     "one short, friendly Vietnamese question about whether the user wants to hear another song. "
     "When asked to stop music, call stop_music. Do not claim a song is playing unless the tool succeeds."
-    " During an English lesson, expand the current topic with one related word, example, mini-game, or "
-    "specific follow-up question. For concrete visual vocabulary or when the learner still does not understand, "
-    "call show_learning_image and teach from the picture. Also use it proactively for concrete educational "
-    "topics outside English lessons, such as an animal, fruit, object or place being discussed. "
-    "Use a precise, child-appropriate query; never search for explicit or disturbing imagery. "
+    " When teaching English or introducing any concrete vocabulary (animal, fruit, food, vehicle, object, "
+    "nature element, color, action) or whenever the user asks about an object or asks to see an image "
+    "(e.g. 'hình con voi', 'cho xem con voi', 'dạy tiếng Anh con voi'), YOU MUST PROACTIVELY CALL "
+    "show_learning_image on that same turn. It will display the illustration edge-to-edge covering the full screen. "
+    "Then immediately teach the word: enthusiastically direct bé's attention to the picture on Wisio's screen, "
+    "model the English pronunciation clearly, explain the Vietnamese meaning, and ask one engaging follow-up "
+    "question about what is shown on screen. Do not wait for the user to ask for a picture. "
+    "Outside English lessons, also use show_learning_image proactively for concrete educational topics. "
+    "Use a precise, child-appropriate English query; never search for explicit or disturbing imagery. "
     "If the image tool fails, continue teaching aloud without claiming a picture is visible. "
     "During a bridge-generated idle event, speak only once: "
     "either continue the recent learning topic, ask one useful health or study question, or share a short "
@@ -185,14 +189,15 @@ MUSIC_TOOLS = [{"functionDeclarations": [
          "query": {"type": "STRING", "description": "Words identifying what should be forgotten"}},
          "required": ["query"]}},
     {"name": "show_learning_image",
-     "description": ("Show one concrete, child-safe illustration on the robot screen while teaching an "
-                     "English word or whenever the user asks to see an image of an animal, fruit, object, "
-                     "place, vehicle or action (e.g. 'cho xem con voi', 'hình con voi', 'what does an apple look like'). "
-                     "Always call this tool for visible nouns."),
+     "description": ("Display a full-screen illustration on the robot screen edge-to-edge. Call this tool "
+                     "PROACTIVELY whenever teaching English vocabulary or introducing any concrete concept "
+                     "(animal, fruit, food, vehicle, object, nature, action, place) or whenever the user asks "
+                     "to see an image (e.g. 'cho xem con voi', 'hình con voi', 'quả táo', 'what does a lion look like'). "
+                     "Call this tool proactively in the same turn without waiting for an explicit request."),
      "parameters": {"type": "OBJECT", "properties": {
-         "word": {"type": "STRING", "description": "The vocabulary word, e.g. elephant, apple, cat"},
+         "word": {"type": "STRING", "description": "The target vocabulary word in English, e.g. elephant, apple, cat"},
          "query": {"type": "STRING", "description": (
-             "A short, clean search term, e.g. elephant, red apple fruit, cute cat")}},
+             "Clean English search term for Wikipedia thumbnail, e.g. elephant, red apple fruit, cute cat")}},
          "required": ["word", "query"]}},
 ]}]
 

@@ -19,6 +19,7 @@
 #include <driver/spi_common.h>
 #include <esp_log.h>
 #include <esp_timer.h>
+#include <esp_wifi.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include <algorithm>
@@ -143,13 +144,6 @@ public:
         lv_obj_set_style_text_color(startup_phase_text_, lv_color_hex(0xFFFFFF), 0);
         lv_obj_set_style_text_font(startup_phase_text_, &lv_font_montserrat_14, 0);
         lv_obj_set_pos(startup_phase_text_, 6, 179);
-
-        loading_phase_text_ = lv_label_create(splash_);
-        lv_label_set_text(loading_phase_text_, "LOADING...");
-        lv_obj_set_style_text_color(loading_phase_text_, lv_color_hex(0xFFFFFF), 0);
-        lv_obj_set_style_text_font(loading_phase_text_, &lv_font_montserrat_14, 0);
-        lv_obj_set_pos(loading_phase_text_, 6, 179);
-        lv_obj_set_style_opa(loading_phase_text_, LV_OPA_TRANSP, 0);
 
         progress_text_ = lv_label_create(splash_);
         lv_obj_set_style_text_color(progress_text_, lv_color_hex(0xFFFFFF), 0);
@@ -288,7 +282,6 @@ private:
     lv_obj_t* waves_[2][2] = {};
     lv_obj_t* status_text_ = nullptr;
     lv_obj_t* startup_phase_text_ = nullptr;
-    lv_obj_t* loading_phase_text_ = nullptr;
     lv_obj_t* progress_text_ = nullptr;
     lv_obj_t* progress_fill_ = nullptr;
     lv_obj_t* transition_mask_ = nullptr;
@@ -316,23 +309,10 @@ private:
     }
 
     void BeginLoadingPhase() {
-        if (loading_phase_started_ || startup_phase_text_ == nullptr || loading_phase_text_ == nullptr)
+        if (loading_phase_started_ || startup_phase_text_ == nullptr)
             return;
         loading_phase_started_ = true;
-
-        lv_anim_t fade;
-        lv_anim_init(&fade);
-        lv_anim_set_duration(&fade, 420);
-        lv_anim_set_path_cb(&fade, lv_anim_path_ease_in_out);
-        lv_anim_set_exec_cb(&fade, SetObjectOpacity);
-
-        lv_anim_set_var(&fade, startup_phase_text_);
-        lv_anim_set_values(&fade, LV_OPA_COVER, LV_OPA_TRANSP);
-        lv_anim_start(&fade);
-
-        lv_anim_set_var(&fade, loading_phase_text_);
-        lv_anim_set_values(&fade, LV_OPA_TRANSP, LV_OPA_COVER);
-        lv_anim_start(&fade);
+        lv_label_set_text(startup_phase_text_, "LOADING...");
     }
 
     static void FinishFaceReveal(lv_anim_t* animation) {
@@ -466,32 +446,17 @@ private:
             esp_timer_get_time() - splash_started_us_ >= 1800 * 1000) {
             BeginLoadingPhase();
         }
-        for (int i = 0; i < 2; ++i) {
-            auto opacity = ((tick_ / 2 + i) % 3 == 0) ? LV_OPA_40 : LV_OPA_COVER;
-            lv_obj_set_style_arc_opa(waves_[i][0], opacity, LV_PART_INDICATOR);
-            lv_obj_set_style_arc_opa(waves_[i][1], opacity, LV_PART_INDICATOR);
-        }
-        static constexpr int sparkle_xy[10][2] = {
-            {41, 39},  {64, 82},  {103, 29},  {126, 91}, {206, 37},
-            {260, 82}, {282, 46}, {233, 132}, {84, 141}, {295, 151},
-        };
-        for (int i = 0; i < 10; ++i) {
-            const unsigned phase = (tick_ + i * 5) % 15;
-            lv_obj_set_style_bg_opa(sparkles_[i], phase < 3 ? LV_OPA_40 : LV_OPA_COVER, 0);
-            lv_obj_set_pos(sparkles_[i], sparkle_xy[i][0] + static_cast<int>(phase / 5) - 1,
-                           sparkle_xy[i][1] - static_cast<int>(phase / 6));
-        }
         if (progress_ < target_progress_ && (ready_ || tick_ % 2 == 0)) {
             const int step = ready_ ? 6 : 1;
             progress_ = std::min(progress_ + step, target_progress_);
+            if (progress_ > 0) {
+                lv_obj_remove_flag(progress_fill_, LV_OBJ_FLAG_HIDDEN);
+                lv_obj_set_width(progress_fill_, std::max(1, 292 * progress_ / 100));
+            }
+            char value[8];
+            snprintf(value, sizeof(value), "%d%%", progress_);
+            lv_label_set_text(progress_text_, value);
         }
-        if (progress_ > 0) {
-            lv_obj_remove_flag(progress_fill_, LV_OBJ_FLAG_HIDDEN);
-            lv_obj_set_width(progress_fill_, std::max(1, 292 * progress_ / 100));
-        }
-        char value[8];
-        snprintf(value, sizeof(value), "%d%%", progress_);
-        lv_label_set_text(progress_text_, value);
         if (ready_ && progress_ == 100) {
             ++completion_ticks_;
             if (completion_ticks_ >= 3)
@@ -712,6 +677,13 @@ public:
         InitializeButtons();
         InitializeTools();
         // SetupUI turns the backlight on only after its first complete frame.
+    }
+
+    void StartNetwork() override {
+        WifiBoard::StartNetwork();
+        // Limit WiFi TX power to 18 dBm (72 * 0.25 dBm) to prevent USB power dips
+        // when LCD backlight, audio PA, and WiFi radio draw current together.
+        esp_wifi_set_max_tx_power(72);
     }
 
     virtual Led* GetLed() override {

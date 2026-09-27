@@ -41,18 +41,25 @@ static std::string DiscoverWisioBridge() {
     }
     int enabled = 1;
     setsockopt(sock, SOL_SOCKET, SO_BROADCAST, &enabled, sizeof(enabled));
-    timeval timeout = {.tv_sec = 0, .tv_usec = 650000};
+    timeval timeout = {.tv_sec = 0, .tv_usec = 400000};
     setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
 
     sockaddr_in destination = {};
     destination.sin_family = AF_INET;
     destination.sin_port = htons(kDiscoveryPort);
     destination.sin_addr.s_addr = htonl(INADDR_BROADCAST);
-    sendto(sock, kRequest, sizeof(kRequest) - 1, 0,
-           reinterpret_cast<sockaddr*>(&destination), sizeof(destination));
 
     char response[192] = {};
-    int received = recvfrom(sock, response, sizeof(response) - 1, 0, nullptr, nullptr);
+    int received = -1;
+    for (int attempt = 0; attempt < 3; ++attempt) {
+        sendto(sock, kRequest, sizeof(kRequest) - 1, 0,
+               reinterpret_cast<sockaddr*>(&destination), sizeof(destination));
+        received = recvfrom(sock, response, sizeof(response) - 1, 0, nullptr, nullptr);
+        if (received > 0) {
+            break;
+        }
+        vTaskDelay(pdMS_TO_TICKS(100));
+    }
     close(sock);
     if (received <= 0) {
         return {};
