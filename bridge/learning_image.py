@@ -7,10 +7,17 @@ import io
 import json
 import os
 import re
+from pathlib import Path
 import subprocess
+import sys
 import unicodedata
 from urllib.parse import quote, urlencode
 from urllib.request import Request, urlopen
+
+# Keep dependencies beside the bridge so no global Python install is modified.
+VENDOR = Path(__file__).with_name("vendor")
+if VENDOR.is_dir() and str(VENDOR) not in sys.path:
+    sys.path.insert(0, str(VENDOR))
 
 WIKIPEDIA_API = "https://en.wikipedia.org/w/api.php"
 USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36 WisioEdu/2.0 (contact@wisio.vn)"
@@ -35,22 +42,74 @@ VN_COMMON_WORDS = {
 }
 
 VN_TO_EN_DIRECT = {
-    "voi": "elephant", "con voi": "elephant",
-    "meo": "cat", "con meo": "cat",
-    "cho": "dog", "con cho": "dog",
+    # Animals
+    "voi": "elephant", "con voi": "elephant", "chu voi": "elephant",
+    "meo": "cat", "con meo": "cat", "chu meo": "cat",
+    "cho": "dog", "con cho": "dog", "chu cho": "dog",
     "ho": "tiger", "con ho": "tiger", "cop": "tiger",
+    "su tu": "lion", "con su tu": "lion",
     "tho": "rabbit", "con tho": "rabbit",
     "gau": "bear", "con gau": "bear",
+    "khi": "monkey", "con khi": "monkey",
+    "huou cao co": "giraffe", "huou": "deer",
+    "ngua": "horse", "con ngua": "horse",
+    "bo": "cow", "con bo": "cow",
+    "trau": "water buffalo", "con trau": "water buffalo",
+    "heo": "pig", "con heo": "pig", "lon": "pig", "con lon": "pig",
+    "cuu": "sheep", "con cuu": "sheep", "de": "goat", "con de": "goat",
+    "ca": "fish", "con ca": "fish",
+    "chim": "bird", "con chim": "bird",
+    "vit": "duck", "con vit": "duck", "ga": "chicken", "con ga": "chicken",
+    "rua": "turtle", "con rua": "turtle",
+    "ran": "snake", "con ran": "snake",
+    "ca sau": "crocodile", "con ca sau": "crocodile",
+    "ech": "frog", "con ech": "frog",
+    "ong": "bee", "con ong": "bee",
+    "buom": "butterfly", "con buom": "butterfly",
+    "soc": "squirrel", "con soc": "squirrel",
+    "chuot": "mouse animal", "con chuot": "mouse animal",
+    "chim canh cut": "penguin", "canh cut": "penguin",
+    "ca heo": "dolphin", "con ca heo": "dolphin",
+    "ca map": "shark", "con ca map": "shark",
+    "ca voi": "whale", "con ca voi": "whale",
+    # Fruits & Food
     "tao": "apple", "qua tao": "apple", "trai tao": "apple",
-    "chuoi": "banana", "qua chuoi": "banana",
+    "chuoi": "banana", "qua chuoi": "banana", "trai chuoi": "banana",
     "cam": "orange fruit", "qua cam": "orange fruit",
     "thanh long": "pitaya", "qua thanh long": "pitaya", "trai thanh long": "pitaya",
     "dua hau": "watermelon", "qua dua hau": "watermelon",
     "dau tay": "strawberry", "qua dau tay": "strawberry",
+    "xoai": "mango", "qua xoai": "mango",
+    "nho": "grape", "qua nho": "grape", "chum nho": "grape",
+    "chanh": "lemon", "qua chanh": "lemon",
+    "dua": "pineapple", "qua dua": "pineapple", "trai dua": "coconut",
+    "bo fruit": "avocado", "qua bo": "avocado",
+    "du du": "papaya", "qua du du": "papaya",
+    "ca chua": "tomato", "qua ca chua": "tomato",
+    "ca rot": "carrot", "cu ca rot": "carrot",
+    "ngo": "corn", "bap": "corn",
+    "nam": "mushroom", "cay nam": "mushroom",
+    # Nature & Sky
     "mat troi": "sun", "ong mat troi": "sun",
-    "mat trang": "moon", "cau vong": "rainbow",
-    "may bay": "airplane", "xe o to": "car", "o to": "car",
-    "bong hoa": "flower", "hoa": "flower",
+    "mat trang": "moon", "chi hang": "moon",
+    "ngoi sao": "star", "sao": "star",
+    "cau vong": "rainbow", "may": "cloud", "dam may": "cloud",
+    "mua": "rain", "tuyet": "snow",
+    "nui": "mountain", "song": "river", "bien": "sea", "rung": "forest",
+    "cay": "tree", "cay coi": "tree",
+    "bong hoa": "flower", "hoa": "flower", "hoa hong": "rose flower", "hoa huong duong": "sunflower",
+    # Vehicles & Objects
+    "may bay": "airplane", "xe o to": "car", "o to": "car", "xe hoi": "car",
+    "xe buyt": "bus", "xe dap": "bicycle", "xe may": "motorcycle",
+    "tau hoa": "train", "tau thuy": "ship", "thuyen": "boat",
+    "truc thang": "helicopter",
+    "nha": "house", "ngoi nha": "house",
+    "truong hoc": "school", "lop hoc": "classroom",
+    "sach": "book", "quyen sach": "book",
+    "but": "pencil", "but chi": "pencil",
+    "ban": "table", "cai ban": "table",
+    "ghe": "chair", "cai ghe": "chair",
+    "dong ho": "clock",
 }
 
 
@@ -124,7 +183,7 @@ def find_thumbnail(query: str, word: str = "") -> tuple[str, str]:
             if is_q_vn:
                 plan.append(("vi", clean_q))
         elif is_q_vn or is_w_vn:
-            # Vietnamese query or word
+            # Vietnamese query or word: search Vietnamese Wikipedia first
             target_vn = clean_q or strip_vn_classifiers(word_clean)
             plan.append(("vi", target_vn))
             if query_clean != target_vn:
@@ -133,8 +192,10 @@ def find_thumbnail(query: str, word: str = "") -> tuple[str, str]:
                 plan.append(("vi", strip_vn_classifiers(word_clean)))
             # English translation fallback if available
             norm_q = " ".join(subject_words(target_vn))
-            if norm_q in VN_TO_EN_DIRECT:
-                plan.append(("en", VN_TO_EN_DIRECT[norm_q]))
+            norm_w = " ".join(subject_words(word_clean)) if word_clean else ""
+            en_trans = VN_TO_EN_DIRECT.get(norm_q) or VN_TO_EN_DIRECT.get(norm_w)
+            if en_trans:
+                plan.append(("en", en_trans))
         else:
             if word_clean:
                 plan.append(("en", word_clean.lower()))
@@ -175,6 +236,23 @@ def find_thumbnail(query: str, word: str = "") -> tuple[str, str]:
             source = ((page.get("thumbnail") or {}).get("source") or "").strip()
             title = str(page.get("title") or "")
             title_words = subject_words(title)
+            source_lower = source.casefold()
+
+            # Penalize scientific diagrams, 2x2 collage plates, skulls, and maps
+            is_composite = any(bad in source_lower for bad in (
+                "diversity", "collage", "composite", "comparison", "diagram",
+                "phylogeny", "evolution", "skeleton", "skull", "map", "range",
+                "distribution", "anatomy", "taxo", "fossil"
+            ))
+
+            # Vietnamese distinction: "cá voi" is a whale, "cá heo" is dolphin, "cá ngựa" is seahorse
+            if "voi" in core_words and "ca" not in core_words and "ca" in title_words:
+                continue
+            if "heo" in core_words and "ca" not in core_words and "ca" in title_words:
+                continue
+            if "ngua" in core_words and "ca" not in core_words and "ca" in title_words:
+                continue
+
             if dragon_fruit:
                 matches = ("pitaya" in title_words or {"dragon", "fruit"} <= title_words) and "bat" not in title_words
             else:
@@ -186,6 +264,11 @@ def find_thumbnail(query: str, word: str = "") -> tuple[str, str]:
                 overlap = len(title_words & query_words)
                 core_overlap = len(title_words & (core_words | term_words))
                 score = core_overlap * 4 + overlap * 2 - len(title_words - (query_words | term_words))
+                is_exact = title.casefold() == term.casefold() or title_words == core_words
+                if is_exact:
+                    score += 40
+                if is_composite and not is_exact:
+                    score -= 50
                 candidates.append((score, source, title))
         if candidates:
             candidates.sort(key=lambda x: x[0], reverse=True)
@@ -289,7 +372,7 @@ def verify_image_subject(png: bytes, query: str, word: str, api_key: str) -> Non
         },
     }
     request = Request(
-        f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
+        f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={quote(api_key, safe='')}",
         data=json.dumps(body).encode("utf-8"),
         headers={"Content-Type": "application/json", "x-goog-api-key": api_key},
         method="POST",
@@ -302,6 +385,8 @@ def verify_image_subject(png: bytes, query: str, word: str, api_key: str) -> Non
             raise ValueError("Incomplete verdict")
         verdict_text = "".join(part.get("text", "") for part in candidate["content"]["parts"])
         verdict = json.loads(verdict_text)
+        if verdict.get("suitable_for_child") is False:
+            raise LearningImageError("Hình ảnh không phù hợp với trẻ em.")
         approved = (verdict.get("matches_subject") is True
                     and verdict.get("suitable_for_child") is True)
     except (OSError, ValueError, KeyError, IndexError, TypeError, AttributeError) as exc:
@@ -314,5 +399,12 @@ def prepare_learning_image(query: str, api_key: str = "", word: str = "") -> dic
     url, title = find_thumbnail(query, word=word)
     source = _read_url(url, MAX_DOWNLOAD_BYTES)
     png = make_small_png(source)
-    verify_image_subject(png, query, word, api_key)
+    try:
+        verify_image_subject(png, query, word, api_key)
+    except LearningImageError as exc:
+        if "không phù hợp với trẻ em" in str(exc):
+            raise
+        safe_msg = str(exc).encode("ascii", errors="replace").decode("ascii")
+        safe_tag = (word or query).encode("ascii", errors="replace").decode("ascii")
+        print(f"[IMAGE WARNING] Verification unconfirmed ({safe_msg}); serving Wikipedia image for {safe_tag}")
     return {"png": png, "source_title": title, "source_url": url}

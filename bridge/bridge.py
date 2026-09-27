@@ -186,13 +186,13 @@ MUSIC_TOOLS = [{"functionDeclarations": [
          "required": ["query"]}},
     {"name": "show_learning_image",
      "description": ("Show one concrete, child-safe illustration on the robot screen while teaching an "
-                     "English word. Use for visible nouns such as animals, food, objects, places, colors "
-                     "or actions when a learner asks what a word means, says they still do not understand, "
-                     "or would clearly benefit from a picture. Do not use for abstract ideas."),
+                     "English word or whenever the user asks to see an image of an animal, fruit, object, "
+                     "place, vehicle or action (e.g. 'cho xem con voi', 'hình con voi', 'what does an apple look like'). "
+                     "Always call this tool for visible nouns."),
      "parameters": {"type": "OBJECT", "properties": {
-         "word": {"type": "STRING", "description": "The English vocabulary word being taught"},
+         "word": {"type": "STRING", "description": "The vocabulary word, e.g. elephant, apple, cat"},
          "query": {"type": "STRING", "description": (
-             "A short, unambiguous English image search, for example: red apple fruit isolated")}},
+             "A short, clean search term, e.g. elephant, red apple fruit, cute cat")}},
          "required": ["word", "query"]}},
 ]}]
 
@@ -1124,30 +1124,43 @@ async def gemini_output(gemini, device, encoder, codec: Opus, session_id: str, v
                             result = {"result": memory_store.forget((call.get("args") or {}).get("query", ""))}
                         elif call.get("name") == "show_learning_image":
                             args = call.get("args") or {}
+                            w = str(args.get("word", "")).strip()
+                            q = str(args.get("query", "")).strip()
+                            print(f"[IMAGE] Request received: word={w!r}, query={q!r}")
                             try:
+                                t0 = time.monotonic()
                                 visual = await asyncio.wait_for(asyncio.to_thread(
-                                    learning_image.prepare_learning_image, args.get("query", ""),
-                                    image_api_key, args.get("word", "")), timeout=14)
+                                    learning_image.prepare_learning_image, q,
+                                    image_api_key, w), timeout=14)
+                                dur = time.monotonic() - t0
+                                print(f"[IMAGE] Ready in {dur:.2f}s: {visual.get('source_title')} ({len(visual['png'])} bytes)")
                             except TimeoutError as exc:
+                                print(f"[IMAGE ERROR] Timeout after 14s for word={w!r}, query={q!r}")
                                 raise learning_image.LearningImageError(
                                     "Chưa tải được hình. Tiếp tục giải thích bằng lời, không nói hình đã hiển thị.") from exc
+                            except Exception as exc:
+                                print(f"[IMAGE ERROR] {type(exc).__name__}: {exc}")
+                                raise
                             await send_json(device, {
                                 "type": "learning_image",
                                 "session_id": session_id,
-                                "word": str(args.get("word", ""))[:48],
+                                "word": str(w)[:48],
                                 "mime_type": "image/png",
                                 "data": base64.b64encode(visual["png"]).decode("ascii"),
                             })
+                            print(f"[IMAGE] Sent to robot display successfully!")
                             result = {"result": (
-                                f"The illustration for {args.get('word', '')} is now visible on the robot. "
-                                "Briefly pronounce the word, explain it in Vietnamese, give one simple "
-                                "English example, then ask one specific practice question about the picture."
+                                f"The illustration for {w or q} is now visible on the robot screen. "
+                                "Say cheerfully in Vietnamese that you have shown the picture on the robot screen, "
+                                "pronounce the English word, explain it briefly, and ask one friendly question about the picture."
                             )}
                         else:
                             result = {"error": "Unknown robot command"}
                     except music.MusicError as exc:
                         result = {"error": str(exc)}
                     except learning_image.LearningImageError as exc:
+                        safe_err = str(exc).encode("ascii", errors="replace").decode("ascii")
+                        print(f"[TOOL ERROR] show_learning_image failed: {safe_err}")
                         result = {"error": str(exc)}
                     responses.append({"id": call.get("id"), "name": call.get("name"), "response": result})
                 if responses:
