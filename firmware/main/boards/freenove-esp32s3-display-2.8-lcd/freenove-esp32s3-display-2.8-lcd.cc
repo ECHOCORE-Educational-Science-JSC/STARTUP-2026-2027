@@ -19,7 +19,6 @@
 #include <driver/spi_common.h>
 #include <esp_log.h>
 #include <esp_timer.h>
-#include <esp_wifi.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include <algorithm>
@@ -176,7 +175,9 @@ public:
         lv_refr_now(nullptr);
         splash_started_us_ = esp_timer_get_time();
         if (auto* backlight = Board::GetInstance().GetBacklight())
-            backlight->SetBrightness(100);
+            // Keep the first LCD/WiFi/audio power peak below the USB brownout
+            // threshold. The user can raise brightness after startup.
+            backlight->SetBrightness(55);
     }
 
     void SetEmotion(const char* emotion) override {
@@ -679,12 +680,7 @@ public:
         // SetupUI turns the backlight on only after its first complete frame.
     }
 
-    void StartNetwork() override {
-        WifiBoard::StartNetwork();
-        // Limit WiFi TX power to 18 dBm (72 * 0.25 dBm) to prevent USB power dips
-        // when LCD backlight, audio PA, and WiFi radio draw current together.
-        esp_wifi_set_max_tx_power(72);
-    }
+    int8_t GetWifiMaxTxPower() const override { return 72; }  // 18 dBm
 
     virtual Led* GetLed() override {
         static SingleLed led(BUILTIN_LED_GPIO);

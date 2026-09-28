@@ -14,6 +14,9 @@ protected:
 
     virtual const char* GetWifiSsidPrefix() const { return "Xiaozhi"; }
     virtual bool AppendMacToWifiSsid() const { return true; }
+    // ESP-IDF units are 0.25 dBm. Zero keeps the configured/default value.
+    // Boards with a tight power budget can cap TX before station/AP startup.
+    virtual int8_t GetWifiMaxTxPower() const { return 0; }
 
     virtual std::string GetBoardJson() override;
 

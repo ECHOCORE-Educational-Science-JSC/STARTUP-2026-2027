@@ -54,8 +54,19 @@ def get_project_version() -> Optional[str]:
     return None
 
 
+def _idf_command() -> list[str]:
+    """Return an idf.py command that also works without Windows file associations."""
+    if os.name == "nt":
+        idf_root = os.environ.get("IDF_PATH", "").strip()
+        if idf_root:
+            script = Path(idf_root) / "tools" / "idf.py"
+            if script.is_file():
+                return [sys.executable, str(script)]
+    return ["idf.py"]
+
+
 def _run_idf(*args: str, preview: bool = False) -> None:
-    command = ["idf.py"]
+    command = _idf_command()
     if preview:
         command.append("--preview")
     command.extend(args)

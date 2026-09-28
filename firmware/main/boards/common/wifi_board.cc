@@ -9,6 +9,7 @@
 #include <esp_log.h>
 #include <esp_mac.h>
 #include <esp_network.h>
+#include <esp_wifi.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include <utility>
@@ -66,6 +67,15 @@ void WifiBoard::StartNetwork() {
         config.station_hostname = hostname;
     }
     wifi_manager.Initialize(config);
+
+    const int8_t max_tx_power = GetWifiMaxTxPower();
+    if (max_tx_power != 0) {
+        esp_err_t power_result = esp_wifi_set_max_tx_power(max_tx_power);
+        if (power_result != ESP_OK) {
+            ESP_LOGW(TAG, "Failed to set WiFi TX power to %d: %s", max_tx_power,
+                     esp_err_to_name(power_result));
+        }
+    }
 
     // Set unified event callback - forward to NetworkEvent with SSID data
     wifi_manager.SetEventCallback([this](WifiEvent event, const std::string& data) {

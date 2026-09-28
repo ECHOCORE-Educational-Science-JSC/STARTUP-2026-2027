@@ -60,9 +60,16 @@ Khi build firmware, hệ thống CMake tự động nhúng (`EMBED_TXTFILES`) fi
    idf.py -p COMx flash monitor
    ```
 
+## 5. Khôi phục khi reset liên tục hoặc không mở được cổng COM
+
+- Nếu terminal có dòng `Brownout detector was triggered`, dùng cáp USB Type-C ngắn có truyền dữ liệu và cắm trực tiếp vào máy tính. Đây là dấu hiệu điện áp nguồn bị tụt.
+- Đóng toàn bộ **ESP-IDF Monitor** trước khi nạp; mỗi Monitor đang chạy đều có thể giữ cổng COM.
+- Ở thư mục gốc của dự án, chạy `FLASH_WISIO_COM5.cmd`. Lệnh này nạp ở 115200 và không mở Monitor mới.
+- Nếu vẫn không kết nối được, giữ **BOOT**, bấm **RESET** một lần, thả **BOOT**, rồi chạy lại file trên.
+
 ---
 
-## 5. Cách Sử Dụng Giao Diện Cấu Hình Wi-Fi Trên Robot
+## 6. Cách Sử Dụng Giao Diện Cấu Hình Wi-Fi Trên Robot
 
 1. Khi robot khởi động mà chưa có mạng Wi-Fi đã lưu, robot sẽ tự động phát mạng Wi-Fi cấu hình (AP mode) tên dạng: `Wisio-Setup` hoặc `EchoCore-WiFi`.
 2. Dùng điện thoại hoặc máy tính kết nối vào mạng Wi-Fi này.

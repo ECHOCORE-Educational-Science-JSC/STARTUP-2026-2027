@@ -39,6 +39,13 @@ void Display::ClearChatMessages() {
     // Default empty implementation, override in subclasses if needed
 }
 
+void Display::ShowMusicPlayer(const std::string& title, const std::string& artist,
+                              uint32_t duration_ms) {}
+
+void Display::UpdateMusicProgress(uint32_t position_ms, uint32_t duration_ms) {}
+
+void Display::HideMusicPlayer() {}
+
 void Display::SetTheme(Theme* theme) {
     current_theme_ = theme;
     Settings settings("display", true);

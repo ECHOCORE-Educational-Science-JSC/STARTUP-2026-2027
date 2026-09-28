@@ -12,12 +12,19 @@
 #include <noto_emoji.h>
 #include <src/misc/cache/lv_cache.h>
 #include <algorithm>
+#include <cstdio>
 #include <cstring>
 #include <vector>
 
 #include "board.h"
 
 #define TAG "LcdDisplay"
+
+static void FormatMusicTime(uint32_t milliseconds, char* output, size_t output_size) {
+    const auto total_seconds = milliseconds / 1000;
+    snprintf(output, output_size, "%02lu:%02lu", static_cast<unsigned long>(total_seconds / 60),
+             static_cast<unsigned long>(total_seconds % 60));
+}
 
 LV_FONT_DECLARE(BUILTIN_TEXT_FONT);
 LV_FONT_DECLARE(BUILTIN_ICON_FONT);
@@ -1041,7 +1048,8 @@ void LcdDisplay::SetPreviewImage(std::unique_ptr<LvglImage> image) {
     auto img_dsc = preview_image_cached_->image_dsc();
     lv_image_set_src(preview_image_, img_dsc);
     if (img_dsc->header.w > 0 && img_dsc->header.h > 0) {
-        // Fit the full display in cover mode so the illustration fills the screen edge-to-edge without black bars.
+        // Fit the full display in cover mode so the illustration fills the screen edge-to-edge
+        // without black bars.
         lv_obj_set_size(preview_image_, img_dsc->header.w, img_dsc->header.h);
         const auto scale_x = 256 * width_ / img_dsc->header.w;
         const auto scale_y = 256 * height_ / img_dsc->header.h;
@@ -1105,6 +1113,148 @@ void LcdDisplay::ClearChatMessages() {
     }
 }
 #endif
+
+void LcdDisplay::ShowMusicPlayer(const std::string& title, const std::string& artist,
+                                 uint32_t duration_ms) {
+    DisplayLockGuard lock(this);
+    auto screen = lv_screen_active();
+    if (music_cover_image_ == nullptr) {
+        music_cover_image_ = lv_image_create(screen);
+        lv_obj_add_flag(music_cover_image_, LV_OBJ_FLAG_HIDDEN);
+    }
+    if (music_panel_ == nullptr) {
+        music_panel_ = lv_obj_create(screen);
+        lv_obj_set_size(music_panel_, LV_HOR_RES, 86);
+        lv_obj_align(music_panel_, LV_ALIGN_BOTTOM_MID, 0, 0);
+        lv_obj_set_style_radius(music_panel_, 0, 0);
+        lv_obj_set_style_border_width(music_panel_, 0, 0);
+        lv_obj_set_style_pad_all(music_panel_, 0, 0);
+        lv_obj_set_style_bg_color(music_panel_, lv_color_black(), 0);
+        lv_obj_set_style_bg_opa(music_panel_, LV_OPA_70, 0);
+        lv_obj_set_scrollbar_mode(music_panel_, LV_SCROLLBAR_MODE_OFF);
+
+        music_title_label_ = lv_label_create(music_panel_);
+        lv_obj_set_width(music_title_label_, LV_HOR_RES - 16);
+        lv_label_set_long_mode(music_title_label_, LV_LABEL_LONG_SCROLL_CIRCULAR);
+        lv_obj_set_style_text_color(music_title_label_, lv_color_white(), 0);
+        lv_obj_align(music_title_label_, LV_ALIGN_TOP_MID, 0, 4);
+
+        music_artist_label_ = lv_label_create(music_panel_);
+        lv_obj_set_width(music_artist_label_, LV_HOR_RES - 16);
+        lv_label_set_long_mode(music_artist_label_, LV_LABEL_LONG_SCROLL_CIRCULAR);
+        lv_obj_set_style_text_color(music_artist_label_, lv_color_hex(0xD0D0D0), 0);
+        lv_obj_align(music_artist_label_, LV_ALIGN_TOP_MID, 0, 27);
+
+        music_progress_bar_ = lv_bar_create(music_panel_);
+        lv_obj_set_size(music_progress_bar_, LV_HOR_RES - 16, 7);
+        lv_obj_align(music_progress_bar_, LV_ALIGN_BOTTOM_MID, 0, -23);
+        lv_bar_set_range(music_progress_bar_, 0, 1000);
+
+        music_time_label_ = lv_label_create(music_panel_);
+        lv_obj_set_width(music_time_label_, LV_HOR_RES - 16);
+        lv_obj_set_style_text_align(music_time_label_, LV_TEXT_ALIGN_CENTER, 0);
+        lv_obj_set_style_text_color(music_time_label_, lv_color_white(), 0);
+        lv_obj_align(music_time_label_, LV_ALIGN_BOTTOM_MID, 0, -2);
+    }
+
+    lv_label_set_text(music_title_label_, title.c_str());
+    lv_label_set_text(music_artist_label_, artist.c_str());
+    lv_bar_set_value(music_progress_bar_, 0, LV_ANIM_OFF);
+    char total[16];
+    if (duration_ms > 0) {
+        FormatMusicTime(duration_ms, total, sizeof(total));
+    } else {
+        strcpy(total, "--:--");
+    }
+    char time_text[40];
+    snprintf(time_text, sizeof(time_text), "00:00 / %s", total);
+    lv_label_set_text(music_time_label_, time_text);
+    if (bottom_bar_ != nullptr) {
+        lv_obj_add_flag(bottom_bar_, LV_OBJ_FLAG_HIDDEN);
+    }
+    lv_obj_remove_flag(music_panel_, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_move_foreground(music_panel_);
+}
+
+void LcdDisplay::SetMusicCover(std::unique_ptr<LvglImage> image) {
+    if (image == nullptr) {
+        return;
+    }
+    DisplayLockGuard lock(this);
+    if (music_cover_image_ == nullptr) {
+        ESP_LOGW(TAG, "Music cover arrived before music player metadata");
+        return;
+    }
+    music_cover_cached_ = std::move(image);
+    auto descriptor = music_cover_cached_->image_dsc();
+    lv_image_set_src(music_cover_image_, descriptor);
+    if (descriptor->header.w > 0 && descriptor->header.h > 0) {
+        lv_obj_set_size(music_cover_image_, descriptor->header.w, descriptor->header.h);
+        const auto scale_x = 256 * width_ / descriptor->header.w;
+        const auto scale_y = 256 * height_ / descriptor->header.h;
+        lv_image_set_scale(music_cover_image_, scale_x > scale_y ? scale_x : scale_y);
+        lv_obj_center(music_cover_image_);
+    }
+    esp_timer_stop(preview_timer_);
+    if (preview_image_ != nullptr) {
+        lv_obj_add_flag(preview_image_, LV_OBJ_FLAG_HIDDEN);
+        preview_image_cached_.reset();
+    }
+    if (gif_controller_) {
+        gif_controller_->Stop();
+    }
+    if (emoji_box_ != nullptr) {
+        lv_obj_add_flag(emoji_box_, LV_OBJ_FLAG_HIDDEN);
+    }
+    lv_obj_remove_flag(music_cover_image_, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_move_foreground(music_cover_image_);
+    if (music_panel_ != nullptr) {
+        lv_obj_move_foreground(music_panel_);
+    }
+}
+
+void LcdDisplay::UpdateMusicProgress(uint32_t position_ms, uint32_t duration_ms) {
+    DisplayLockGuard lock(this);
+    if (music_progress_bar_ == nullptr || music_time_label_ == nullptr) {
+        return;
+    }
+    if (duration_ms > 0 && position_ms > duration_ms) {
+        position_ms = duration_ms;
+    }
+    const int32_t value =
+        duration_ms > 0
+            ? static_cast<int32_t>((static_cast<uint64_t>(position_ms) * 1000) / duration_ms)
+            : 0;
+    lv_bar_set_value(music_progress_bar_, value, LV_ANIM_ON);
+    char position[16];
+    char total[16];
+    FormatMusicTime(position_ms, position, sizeof(position));
+    if (duration_ms > 0) {
+        FormatMusicTime(duration_ms, total, sizeof(total));
+    } else {
+        strcpy(total, "--:--");
+    }
+    char time_text[40];
+    snprintf(time_text, sizeof(time_text), "%s / %s", position, total);
+    lv_label_set_text(music_time_label_, time_text);
+}
+
+void LcdDisplay::HideMusicPlayer() {
+    DisplayLockGuard lock(this);
+    if (music_panel_ != nullptr) {
+        lv_obj_add_flag(music_panel_, LV_OBJ_FLAG_HIDDEN);
+    }
+    if (music_cover_image_ != nullptr) {
+        lv_obj_add_flag(music_cover_image_, LV_OBJ_FLAG_HIDDEN);
+    }
+    music_cover_cached_.reset();
+    if (emoji_box_ != nullptr) {
+        lv_obj_remove_flag(emoji_box_, LV_OBJ_FLAG_HIDDEN);
+    }
+    if (gif_controller_) {
+        gif_controller_->Start();
+    }
+}
 
 void LcdDisplay::SetEmotion(const char* emotion) {
     if (!setup_ui_called_) {

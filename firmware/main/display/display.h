@@ -40,6 +40,10 @@ public:
     virtual void SetEmotion(const char* emotion);
     virtual void SetChatMessage(const char* role, const char* content);
     virtual void ClearChatMessages();
+    virtual void ShowMusicPlayer(const std::string& title, const std::string& artist,
+                                 uint32_t duration_ms);
+    virtual void UpdateMusicProgress(uint32_t position_ms, uint32_t duration_ms);
+    virtual void HideMusicPlayer();
     virtual void SetTheme(Theme* theme);
     virtual Theme* GetTheme() { return current_theme_; }
     virtual void UpdateStatusBar(bool update_all = false);

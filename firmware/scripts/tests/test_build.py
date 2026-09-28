@@ -18,6 +18,17 @@ SPEC.loader.exec_module(build)
 
 
 class VersionTests(unittest.TestCase):
+    def test_windows_idf_command_uses_python_interpreter(self):
+        with (
+            mock.patch.object(build.os, "name", "nt"),
+            mock.patch.dict(build.os.environ, {"IDF_PATH": str(ROOT.parent)}, clear=False),
+            mock.patch.object(build.Path, "is_file", return_value=True),
+        ):
+            command = build._idf_command()
+
+        self.assertEqual(command[0], build.sys.executable)
+        self.assertTrue(command[1].replace("\\", "/").endswith("/tools/idf.py"))
+
     def test_parse_and_match(self):
         self.assertEqual(build._parse_version("ESP-IDF v6.0.1"), (6, 0, 1))
         self.assertTrue(build._version_matches((5, 5, 4), "<6.0"))

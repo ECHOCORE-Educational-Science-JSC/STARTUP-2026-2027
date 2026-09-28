@@ -51,6 +51,13 @@ Tài liệu này cung cấp hướng dẫn toàn diện từ A đến Z dành ch
    ```
    *(Thay `COMx` bằng cổng COM thực tế)*.
 
+### Khi VS Code mở nhiều Terminal hoặc bo reset liên tục
+
+1. Đóng tất cả terminal có tên **ESP-IDF Monitor**. Monitor giữ cổng COM nên trình nạp không thể mở cổng.
+2. Cắm bo trực tiếp vào cổng USB máy tính bằng cáp Type-C ngắn, có truyền dữ liệu. Dòng `Brownout detector was triggered` nghĩa là nguồn 5 V/cáp đang bị sụt áp.
+3. Tại thư mục gốc, chạy `FLASH_WISIO_COM5.cmd`. Script đóng các tiến trình Monitor còn sót, build và chỉ nạp firmware ở tốc độ ổn định 115200; script không tự mở Monitor mới.
+4. Nếu bo không tự vào chế độ nạp: giữ **BOOT**, bấm **RESET** một lần, thả **BOOT**, rồi chạy lại script.
+
 ---
 
 ## 3. Cấu Hình Mạng Wi-Fi Cho Robot

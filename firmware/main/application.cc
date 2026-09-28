@@ -9,6 +9,7 @@
 #include "mcp_server.h"
 #include "memory_manager.h"
 #include "mqtt_protocol.h"
+#include "music_message.h"
 #include "preview_download.h"
 #include "settings.h"
 #include "system_info.h"
@@ -16,12 +17,12 @@
 #include "websocket_protocol.h"
 
 #include <driver/gpio.h>
+#include <esp_heap_caps.h>
 #include <esp_log.h>
 #include <esp_timer.h>
-#include <esp_heap_caps.h>
 #include <arpa/inet.h>
-#include <lwip/sockets.h>
 #include <cJSON.h>
+#include <lwip/sockets.h>
 #include <mbedtls/base64.h>
 #include <cerrno>
 #include <cstring>
@@ -52,8 +53,8 @@ static std::string DiscoverWisioBridge() {
     char response[192] = {};
     int received = -1;
     for (int attempt = 0; attempt < 3; ++attempt) {
-        sendto(sock, kRequest, sizeof(kRequest) - 1, 0,
-               reinterpret_cast<sockaddr*>(&destination), sizeof(destination));
+        sendto(sock, kRequest, sizeof(kRequest) - 1, 0, reinterpret_cast<sockaddr*>(&destination),
+               sizeof(destination));
         received = recvfrom(sock, response, sizeof(response) - 1, 0, nullptr, nullptr);
         if (received > 0) {
             break;
@@ -338,6 +339,8 @@ void Application::Run() {
                     if (music_idle_seconds_ >= 4) {
                         ESP_LOGI(TAG, "Music playback idle timeout, returning to idle");
                         music_playback_ = false;
+                        music_playback_token_.clear();
+                        display->HideMusicPlayer();
                         music_idle_seconds_ = 0;
                         if (GetDeviceState() == kDeviceStateSpeaking) {
                             SetDeviceState(kDeviceStateIdle);
@@ -567,8 +570,7 @@ void Application::CheckNewVersion() {
 #else
         const bool allow_builtin_ota_fallback = true;
 #endif
-        if (connection_failed && configured_url != CONFIG_OTA_URL &&
-            allow_builtin_ota_fallback) {
+        if (connection_failed && configured_url != CONFIG_OTA_URL && allow_builtin_ota_fallback) {
             ESP_LOGW(TAG, "OTA URL %s failed (code=%d); trying built-in URL %s",
                      configured_url.c_str(), err, CONFIG_OTA_URL);
             attempted_url = CONFIG_OTA_URL;
@@ -760,18 +762,129 @@ void Application::InitializeProtocol() {
             if (!cJSON_IsString(state)) {
                 return;
             }
-            if (strcmp(state->valuestring, "start") == 0) {
-                Schedule([this]() {
+            auto token_json = cJSON_GetObjectItem(root, "playback_token");
+            std::string token;
+            if (cJSON_IsString(token_json) && strlen(token_json->valuestring) <= 64) {
+                token = token_json->valuestring;
+            }
+            const auto music_state = ParseMusicMessageState(state->valuestring);
+            if (music_state == MusicMessageState::kStart) {
+                auto title_json = cJSON_GetObjectItem(root, "title");
+                auto artist_json = cJSON_GetObjectItem(root, "artist");
+                auto duration_json = cJSON_GetObjectItem(root, "duration_ms");
+                std::string title =
+                    cJSON_IsString(title_json) && strlen(title_json->valuestring) <= 160
+                        ? title_json->valuestring
+                        : "";
+                std::string artist =
+                    cJSON_IsString(artist_json) && strlen(artist_json->valuestring) <= 160
+                        ? artist_json->valuestring
+                        : "";
+                uint32_t duration_ms = 0;
+                if (cJSON_IsNumber(duration_json) && duration_json->valuedouble >= 0 &&
+                    duration_json->valuedouble <= std::numeric_limits<uint32_t>::max()) {
+                    duration_ms = static_cast<uint32_t>(duration_json->valuedouble);
+                }
+                Schedule([this, display, token = std::move(token), title = std::move(title),
+                          artist = std::move(artist), duration_ms]() {
                     music_playback_ = true;
                     aborted_ = false;
+                    music_idle_seconds_ = 0;
+                    if (!token.empty()) {
+                        music_playback_token_ = token;
+                        display->ShowMusicPlayer(title, artist, duration_ms);
+                    }
                     SetDeviceState(kDeviceStateSpeaking);
                     // Music must only be interrupted by a physical button or touch.
                     audio_service_.EnableVoiceProcessing(false);
                     audio_service_.EnableWakeWordDetection(false);
                 });
-            } else if (strcmp(state->valuestring, "stop") == 0) {
-                Schedule([this]() {
+            } else if (music_state == MusicMessageState::kCover) {
+                auto encoded = cJSON_GetObjectItem(root, "data");
+                if (token.empty() || !cJSON_IsString(encoded)) {
+                    ESP_LOGW(TAG, "Music cover requires a token and base64 data");
+                    return;
+                }
+                const size_t encoded_size = strlen(encoded->valuestring);
+                constexpr size_t kMaxEncodedCoverSize = 320 * 1024;
+                constexpr size_t kMaxDecodedCoverSize = 240 * 1024;
+                if (encoded_size == 0 || encoded_size > kMaxEncodedCoverSize) {
+                    ESP_LOGW(TAG, "Rejected oversized music cover");
+                    return;
+                }
+                const size_t allocation_size = (encoded_size / 4) * 3 + 3;
+                if (allocation_size > kMaxDecodedCoverSize) {
+                    ESP_LOGW(TAG, "Rejected music cover allocation");
+                    return;
+                }
+                auto* image_data =
+                    static_cast<uint8_t*>(heap_caps_malloc(allocation_size, MALLOC_CAP_8BIT));
+                if (image_data == nullptr) {
+                    ESP_LOGE(TAG, "Not enough memory for music cover");
+                    return;
+                }
+                size_t decoded_size = 0;
+                const int decode_result = mbedtls_base64_decode(
+                    image_data, allocation_size, &decoded_size,
+                    reinterpret_cast<const unsigned char*>(encoded->valuestring), encoded_size);
+                constexpr uint8_t kPngSignature[] = {0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n'};
+                if (decode_result != 0 || decoded_size < sizeof(kPngSignature) ||
+                    memcmp(image_data, kPngSignature, sizeof(kPngSignature)) != 0) {
+                    ESP_LOGW(TAG, "Rejected invalid music cover");
+                    heap_caps_free(image_data);
+                    return;
+                }
+                Schedule([this, display, token = std::move(token), image_data, decoded_size]() {
+                    std::unique_ptr<void, decltype(&heap_caps_free)> data(image_data,
+                                                                          heap_caps_free);
+                    if (music_playback_token_ != token) {
+                        return;
+                    }
+#if HAVE_LVGL
+                    auto* lvgl_display = dynamic_cast<LvglDisplay*>(display);
+                    if (lvgl_display == nullptr) {
+                        return;
+                    }
+                    try {
+                        auto image = std::make_unique<LvglAllocatedImage>(data.get(), decoded_size);
+                        data.release();
+                        lvgl_display->SetMusicCover(std::move(image));
+                    } catch (const std::exception& error) {
+                        ESP_LOGE(TAG, "Cannot display music cover: %s", error.what());
+                    }
+#endif
+                });
+            } else if (music_state == MusicMessageState::kProgress) {
+                auto position_json = cJSON_GetObjectItem(root, "position_ms");
+                auto duration_json = cJSON_GetObjectItem(root, "duration_ms");
+                if (token.empty() || !cJSON_IsNumber(position_json) ||
+                    !cJSON_IsNumber(duration_json) || position_json->valuedouble < 0 ||
+                    duration_json->valuedouble < 0 ||
+                    position_json->valuedouble > std::numeric_limits<uint32_t>::max() ||
+                    duration_json->valuedouble > std::numeric_limits<uint32_t>::max()) {
+                    ESP_LOGW(TAG, "Rejected invalid music progress");
+                    return;
+                }
+                uint32_t position_ms = static_cast<uint32_t>(position_json->valuedouble);
+                const uint32_t duration_ms = static_cast<uint32_t>(duration_json->valuedouble);
+                if (duration_ms > 0 && position_ms > duration_ms) {
+                    position_ms = duration_ms;
+                }
+                Schedule([this, display, token = std::move(token), position_ms, duration_ms]() {
+                    if (music_playback_token_ != token) {
+                        return;
+                    }
+                    display->UpdateMusicProgress(position_ms, duration_ms);
+                });
+            } else if (music_state == MusicMessageState::kStop) {
+                Schedule([this, display, token = std::move(token)]() {
+                    if (!token.empty() && !music_playback_token_.empty() &&
+                        music_playback_token_ != token) {
+                        return;
+                    }
                     music_playback_ = false;
+                    music_playback_token_.clear();
+                    display->HideMusicPlayer();
                     if (GetDeviceState() == kDeviceStateSpeaking) {
                         if (listening_mode_ == kListeningModeManualStop) {
                             SetDeviceState(kDeviceStateIdle);
@@ -780,12 +893,15 @@ void Application::InitializeProtocol() {
                         }
                     }
                 });
+            } else {
+                ESP_LOGW(TAG, "Unknown music state: %s", state->valuestring);
             }
         } else if (strcmp(type->valuestring, "learning_image") == 0) {
             auto encoded = cJSON_GetObjectItem(root, "data");
             auto url = cJSON_GetObjectItem(root, "url");
 
-            if (cJSON_IsString(url) && (!cJSON_IsString(encoded) || strlen(encoded->valuestring) == 0)) {
+            if (cJSON_IsString(url) &&
+                (!cJSON_IsString(encoded) || strlen(encoded->valuestring) == 0)) {
 #if HAVE_LVGL
                 static std::atomic<bool> image_loading{false};
                 if (image_loading.exchange(true)) {
@@ -865,8 +981,8 @@ void Application::InitializeProtocol() {
                          static_cast<unsigned>(allocation_size));
                 return;
             }
-            auto* image_data = static_cast<uint8_t*>(
-                heap_caps_malloc(allocation_size, MALLOC_CAP_8BIT));
+            auto* image_data =
+                static_cast<uint8_t*>(heap_caps_malloc(allocation_size, MALLOC_CAP_8BIT));
             if (image_data == nullptr) {
                 ESP_LOGE(TAG, "Not enough memory for learning image");
                 return;
@@ -878,7 +994,8 @@ void Application::InitializeProtocol() {
             constexpr uint8_t kPngSignature[] = {0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n'};
             bool is_png = decoded_size >= sizeof(kPngSignature) &&
                           memcmp(image_data, kPngSignature, sizeof(kPngSignature)) == 0;
-            bool is_jpeg = decoded_size >= 3 && image_data[0] == 0xFF && image_data[1] == 0xD8 && image_data[2] == 0xFF;
+            bool is_jpeg = decoded_size >= 3 && image_data[0] == 0xFF && image_data[1] == 0xD8 &&
+                           image_data[2] == 0xFF;
             if (result != 0 || (!is_png && !is_jpeg)) {
                 ESP_LOGW(TAG, "Rejected invalid learning image format (decode result %d)", result);
                 heap_caps_free(image_data);
@@ -1313,6 +1430,8 @@ void Application::HandleStateChangedEvent() {
             audio_service_.EnableWakeWordDetection(true);
             music_playback_ = false;
             music_idle_seconds_ = 0;
+            music_playback_token_.clear();
+            display->HideMusicPlayer();
             break;
         case kDeviceStateConnecting:
             display->SetStatus(Lang::Strings::CONNECTING);
@@ -1344,8 +1463,8 @@ void Application::HandleStateChangedEvent() {
             if (listening_mode_ != kListeningModeRealtime) {
                 audio_service_.EnableVoiceProcessing(false);
                 // Only AFE wake word can be detected in speaking mode
-                audio_service_.EnableWakeWordDetection(music_playback_ ? false
-                                                                       : audio_service_.IsAfeWakeWord());
+                audio_service_.EnableWakeWordDetection(
+                    music_playback_ ? false : audio_service_.IsAfeWakeWord());
             }
             audio_service_.ResetDecoder();
             break;
@@ -1473,6 +1592,8 @@ void Application::AbortSpeaking(AbortReason reason) {
     aborted_ = true;
     music_playback_ = false;
     music_idle_seconds_ = 0;
+    music_playback_token_.clear();
+    Board::GetInstance().GetDisplay()->HideMusicPlayer();
     if (protocol_) {
         protocol_->SendAbortSpeaking(reason);
     }
