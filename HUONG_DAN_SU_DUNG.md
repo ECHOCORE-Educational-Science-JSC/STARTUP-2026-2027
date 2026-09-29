@@ -1,150 +1,146 @@
 # SỔ TAY HƯỚNG DẪN CÀI ĐẶT & VẬN HÀNH ROBOT AI WISIO
-
-Tài liệu này cung cấp hướng dẫn toàn diện từ A đến Z dành cho các kỹ sư, giáo viên và phụ huynh khi triển khai Robot AI Wisio (EchoCore Ecosystem).
-
----
-
-## MỤC LỤC
-1. [Chuẩn Bị Phần Cứng & Kết Nối Mạch](#1-chuẩn-bị-phần-cứng--kết-nối-mạch)
-2. [Cài Đặt Môi Trường & Nạp Firmware](#2-cài-đặt-môi-trường--nạp-firmware)
-3. [Cấu Hình Mạng Wi-Fi Cho Robot](#3-cấu-hình-mạng-wi-fi-cho-robot)
-4. [Thiết Lập & Khởi Động Bridge Server](#4-thiết-lập--khởi-động-bridge-server)
-5. [Hướng Dẫn Tương Tác & Các Câu Lệnh Tiêu Biểu](#5-hướng-dẫn-tương-tác--các-câu-lệnh-tiêu-biểu)
-6. [Xử Lý Sự Cố Thường Gặp (Troubleshooting)](#6-xử-lý-sự-cố-thường-gặp-troubleshooting)
+### Hệ Sinh Thái EchoCore - Educational Science JSC
+*Phiên bản: 2.0 (Cập nhật tháng 09/2026 - Tích hợp Gemini 2.0 / 3.8 Live, Music Player V2 & Giao Diện Cấu Hình Cute)*
 
 ---
 
-## 1. Chuẩn Bị Phần Cứng & Kết Nối Mạch
+## 📦 1. TỔNG QUAN GÓI PHẦN MỀM (DISTRIBUTION PACKAGE)
 
-### Danh sách thiết bị:
-- **Bo mạch chính:** Freenove ESP32-S3 All-in-One tích hợp màn hình 2.8" LCD cảm ứng (hoặc màn thường kèm nút bấm).
-- **Phụ kiện:**
-  - Cảm biến chạm TTP223 nối chân Wake-up (hoặc dùng nút BOOT trên bo mạch).
-  - Pin Li-Po / Polymer 3.7V dung lượng 5.000mAh - 10.000mAh.
-  - Loa và micro tích hợp trên bo mạch.
-  - Cáp kết nối máy tính USB Type-C truyền dữ liệu tốt.
+Thư mục này đã được đóng gói trọn vẹn để bất kỳ thành viên nào trong đội ngũ cũng có thể triển khai Robot Wisio ngay lập tức mà không cần cài đặt phức tạp:
+
+| Thư Mục / Tập Tin | Ý Nghĩa & Vai Trò |
+| :--- | :--- |
+| **`FLASH_FIRMWARE.cmd`** | **Công cụ nạp Firmware 1-Click:** Tự động dò tìm cổng COM và nạp firmware vào ESP32-S3 trong vài giây. |
+| **`START_BRIDGE.cmd`** | **Khởi động Bridge Server 1-Click:** Tự động tạo môi trường ảo Python và khởi chạy server kết nối Gemini Live. |
+| **`firmware_bin/`** | Chứa toàn bộ các file binary đã biên dịch sẵn (`xiaozhi.bin`, `bootloader.bin`, `assets`, `partition-table`). |
+| **`bridge/`** | Toàn bộ mã nguồn máy chủ Bridge (xử lý âm thanh 24kHz, AI Gemini Live, tìm kiếm nhạc, tải ảnh từ vựng trực quan). |
+| **`firmware/`** | Toàn bộ mã nguồn C/C++ firmware ESP-IDF (dành cho lập trình viên muốn tinh chỉnh, thêm tính năng hoặc tùy biến bo mạch). |
+| **`HUONG_DAN_SU_DUNG.md`** | Tài liệu hướng dẫn này. |
 
 ---
 
-## 2. Cài Đặt Môi Trường & Nạp Firmware
+## 🛠️ 2. CHUẨN BỊ PHẦN CỨNG
 
-### Cách 1: Nạp Bằng VS Code (Khuyên dùng)
-1. Cài đặt **Visual Studio Code** và cài extension chính thức **ESP-IDF** (Espressif).
-2. Mở thư mục `firmware/` trong VS Code.
-3. Ở thanh công cụ màu xanh dưới đáy màn hình VS Code:
-   - Click chọn **Target**: Chọn `ESP32-S3`.
-   - Click chọn **Port**: Chọn cổng COM của bo mạch (ví dụ `COM3`, `COM4`...).
-   - Click chọn **Flash Method**: Chọn `UART`.
-4. Nhấn nút biểu tượng tia sét ⚡ (**Build, Flash and Monitor**).
-5. Chờ quá trình biên dịch và nạp đạt `100% (Hash of data verified.)`. Bo mạch sẽ tự khởi động lại.
+1. **Bo mạch chính:** Freenove ESP32-S3 tích hợp màn hình LCD 2.8" (320x240) có loa và micro.
+2. **Cáp kết nối:** Cáp USB Type-C có chức năng truyền dữ liệu (Data Cable).
+3. **Nguồn cấp:** Cổng USB máy tính hoặc củ sạc 5V-2A ổn định.
 
-### Cách 2: Nạp Bằng Dòng Lệnh (ESP-IDF Terminal)
-1. Mở cửa sổ **ESP-IDF 5.5 PowerShell**.
-2. Di chuyển vào thư mục:
-   ```powershell
-   cd firmware
-   ```
-3. Chạy lệnh biên dịch và nạp:
+---
+
+## ⚡ 3. HƯỚNG DẪN NẠP FIRMWARE CHO ROBOT
+
+### 👉 Cách 1: Nạp Nhanh Bằng Công Cụ Tự Động (Khuyên dùng - 10 Giây)
+Không cần cài đặt ESP-IDF hay CMake nặng nề:
+1. Cắm cáp USB nối bo mạch Wisio với máy tính.
+2. Kích đúp vào file **`FLASH_FIRMWARE.cmd`** ở thư mục gốc.
+3. Màn hình console xuất hiện danh sách cổng COM:
+   - Nhấn **Enter** để chọn cổng COM khuyến nghị (hoặc gõ số thứ tự cổng).
+   - Chọn chế độ nạp:
+     - **[1] Nạp cập nhật nhanh (App Only - ~10s):** *(Mặc định)* Nạp bản firmware mới nhất, giữ nguyên Wi-Fi đã cấu hình và bộ nhớ tranh ảnh/âm thanh.
+     - **[2] Nạp toàn bộ (Full Flash - ~30s):** Nạp sạch sẽ từ đầu gồm bootloader, phân vùng, assets và firmware (khuyên dùng khi bo mới xuất xưởng).
+4. Chờ thanh phần trăm chạy đến `100% (Hash of data verified.)`. Robot sẽ tự động khởi động lại!
+
+> [!TIP]
+> **Nếu máy tính không nhận cổng hoặc báo lỗi kết nối:**
+> - Nhấn giữ nút **BOOT** trên bo mạch, bấm nút **RESET** một lần, rồi thả nút **BOOT**.
+> - Đảm bảo đã đóng mọi cửa sổ Serial Monitor (như trên Arduino IDE hoặc VS Code).
+> - Sau đó chạy lại `FLASH_FIRMWARE.cmd`.
+
+### 👉 Cách 2: Tự Biên Dịch Từ Mã Nguồn (Dành cho Dev Firmware)
+1. Cài đặt **ESP-IDF v5.5.x** hoặc **v6.0.2**.
+2. Mở thư mục `firmware/` trong VS Code hoặc Terminal ESP-IDF.
+3. Chạy lệnh:
    ```powershell
    python scripts/build.py freenove-esp32s3-display-2.8-lcd
-   idf.py -p COMx flash monitor
+   idf.py -p COMx flash
    ```
-   *(Thay `COMx` bằng cổng COM thực tế)*.
-
-### Khi VS Code mở nhiều Terminal hoặc bo reset liên tục
-
-1. Đóng tất cả terminal có tên **ESP-IDF Monitor**. Monitor giữ cổng COM nên trình nạp không thể mở cổng.
-2. Cắm bo trực tiếp vào cổng USB máy tính bằng cáp Type-C ngắn, có truyền dữ liệu. Dòng `Brownout detector was triggered` nghĩa là nguồn 5 V/cáp đang bị sụt áp.
-3. Tại thư mục gốc, chạy `FLASH_WISIO_COM5.cmd`. Script đóng các tiến trình Monitor còn sót, build và chỉ nạp firmware ở tốc độ ổn định 115200; script không tự mở Monitor mới.
-4. Nếu bo không tự vào chế độ nạp: giữ **BOOT**, bấm **RESET** một lần, thả **BOOT**, rồi chạy lại script.
 
 ---
 
-## 3. Cấu Hình Mạng Wi-Fi Cho Robot
+## 📶 4. CẤU HÌNH MẠNG WI-FI CHO ROBOT (PORTAL SIÊU CUTE)
 
-1. Sau khi nạp firmware, robot khởi động lên. Nếu chưa có Wi-Fi đã lưu, robot sẽ tự động phát mạng Access Point để cấu hình.
-2. Mở điện thoại hoặc laptop, vào mục cài đặt Wi-Fi và tìm mạng:
+1. Khi bật nguồn lần đầu (hoặc khi chưa lưu Wi-Fi), robot sẽ phát ra mạng Wi-Fi cấu hình:
    ```text
    Wisio-Setup (hoặc EchoCore-WiFi)
    ```
-3. Bấm kết nối vào mạng Wi-Fi này. Trang giao diện cấu hình siêu cute sẽ tự động mở lên trên trình duyệt.
-   *(Nếu không tự mở, hãy truy cập địa chỉ `http://192.168.4.1`)*.
-4. Trên giao diện cấu hình:
-   - **Mục 1 (Chọn mạng):** Chọn Wi-Fi gia đình bạn muốn kết nối (danh sách hiển thị kèm cột sóng 3 vạch và nhãn Mạnh/Tốt/Yếu).
-   - **Mục 2 (Mật khẩu):** Điền mật khẩu mạng Wi-Fi (có icon con mắt bật/tắt xem mật khẩu).
-   - **Mục 3 (Email phụ huynh):** Nhập email của ba mẹ để nhận báo cáo học tập và cảnh báo an toàn của bé.
-5. Bấm nút **Kết Nối Wisio! 🚀** -> Robot sẽ lưu thông số vào bộ nhớ Flash NVS, kết nối mạng và chuyển sang trạng thái sẵn sàng.
+2. Mở điện thoại hoặc laptop, kết nối vào mạng Wi-Fi trên.
+3. Trình duyệt sẽ tự động mở trang cấu hình giao diện chú thỏ Wisio dễ thương *(nếu không tự mở, hãy gõ địa chỉ `http://192.168.4.1`)*:
+   - **Bước 1:** Chọn tên Wi-Fi nhà bạn từ danh sách quét sẵn (có vạch sóng trực quan).
+   - **Bước 2:** Điền mật khẩu Wi-Fi (có mắt bật/tắt hiển thị mật khẩu).
+   - **Bước 3:** Điền email ba mẹ để nhận báo cáo học tập định kỳ và cảnh báo an toàn bảo vệ bé.
+4. Bấm nút **Kết Nối Wisio! 🚀** $\rightarrow$ Robot sẽ lưu vào bộ nhớ Flash và kết nối mạng ngay lập tức.
 
 ---
 
-## 4. Thiết Lập & Khởi Động Bridge Server
+## 🚀 5. THIẾT LẬP & KHỞI CHẠY BRIDGE SERVER
 
-Bridge Server là cầu nối thông minh giữa Robot Wisio và trí tuệ nhân tạo Google Gemini Live trên máy tính.
+Bridge Server đóng vai trò não bộ, chuyển đổi âm thanh thời gian thực giữa Robot Wisio và Google Gemini AI.
 
-### Chuẩn bị:
-- Máy tính chạy Windows 10/11 có cài sẵn **Python 3.11 - 3.14**.
-- Kết nối máy tính vào **cùng mạng Wi-Fi** với Robot Wisio.
-- Lấy miễn phí một mã **Google Gemini API Key** từ [Google AI Studio](https://aistudio.google.com/app/apikey).
+### Điều kiện tiên quyết:
+- Máy tính chạy Windows 10/11 có kết nối **cùng mạng Wi-Fi** với Robot Wisio.
+- Máy tính đã cài sẵn **Python** (phiên bản từ 3.11 đến 3.14). Nếu chưa có, tải tại [python.org](https://www.python.org/downloads/) *(nhớ tích chọn "Add python.exe to PATH")*.
+- Một mã **Google Gemini API Key** miễn phí từ [Google AI Studio](https://aistudio.google.com/app/apikey).
 
-### Khởi động Server:
-1. Mở thư mục `bridge/`.
-2. Kích đúp vào file `start_bridge.cmd`.
-3. Khi cửa sổ đen hiện ra:
-   - Nhập hoặc dán mã Gemini API Key bạn vừa copy.
-   - Nhấn **Enter**.
-4. Cửa sổ console sẽ hiện dòng chữ:
+### Các bước khởi động:
+1. Kích đúp vào file **`START_BRIDGE.cmd`** tại thư mục gốc.
+2. Nếu là lần đầu chạy:
+   - Script sẽ tự động tạo môi trường ảo Python `.venv` và tải các thư viện cần thiết (`websockets`, `yt-dlp`, `imageio-ffmpeg`, `pillow`...).
+   - Bạn chỉ cần dán mã **Gemini API Key** khi cửa sổ nhắc hỏi rồi nhấn **Enter**.
+   - *(Hoặc bạn có thể tạo sẵn file `.env` trong thư mục `bridge/` với nội dung `GEMINI_API_KEY=AIzaSy...`)*.
+3. Khi Server sẵn sàng, màn hình sẽ thông báo:
    ```text
    Gemini API key verified
-   OTA URL: http://<IP>:8003/xiaozhi/ota/
-   Xiaozhi WebSocket: ws://<IP>:8000/xiaozhi/v1/
+   OTA URL: http://<IP_MÁY_TÍNH>:8003/xiaozhi/ota/
+   Xiaozhi WebSocket: ws://<IP_MÁY_TÍNH>:8000/xiaozhi/v1/
    Keep this window open while using Freenove.
    ```
-5. Bật công tắc Robot Wisio. Sau khoảng 2-3 giây, màn hình console sẽ báo:
+4. Bật công tắc Robot Wisio lên: Trong vòng 2-3 giây, màn hình Console sẽ hiện:
    ```text
    Wisio connected; protocol v1
    Gemini Live connected (gemini-3.8-live; voice: Zephyr)
    ```
-   Robot sẽ cất tiếng chào bé bằng giọng chú thỏ dễ thương!
+   Robot Wisio sẽ cất giọng chú thỏ chào bé bằng tiếng Việt thân thương!
 
 ---
 
-## 5. Hướng Dẫn Tương Tác & Các Câu Lệnh Tiêu Biểu
+## 🌟 6. TRẢI NGHIỆM CÁC TÍNH NĂNG NỔI BẬT
 
-### 🎨 Học Từ Vựng Trực Quan (Tự Động Hiện Ảnh):
-Chỉ cần bé hoặc phụ huynh hỏi về một đồ vật hoặc học từ vựng (hỗ trợ cả tiếng Việt và tiếng Anh):
-- *"Wisio ơi, con voi trông như thế nào?"* hoặc *"Dạy bé từ con voi đi!"*
-  $\rightarrow$ Wisio: *"Con voi tiếng Anh là Elephant! E-L-E-P-H-A-N-T!"* $\rightarrow$ **Màn hình LCD ngay lập tức hiện bức ảnh chú voi cực nét!**
-- *"Con mèo tiếng Anh là gì?"*
-  $\rightarrow$ Wisio: *"Con mèo tiếng Anh là Cat! Bé phát âm theo mình nha: Cat!"* $\rightarrow$ **Màn hình hiện ảnh chú mèo siêu đáng yêu!**
-- *"Dạy bé từ quả táo đi!"*
-  $\rightarrow$ Wisio dạy từ *Apple* và màn hình hiện quả táo đỏ tươi!
-- *"Mặt trời, cầu vồng, máy bay, xe ô tô tiếng Anh đọc sao?"*
-  $\rightarrow$ Wisio giảng giải và tự động minh họa hình ảnh trực quan trên màn hình.
+### 🎵 1. Phát Nhạc Thông Minh & Giao Diện Player Hiện Đại (Music Player V2):
+- **Câu lệnh mẫu:**
+  - *"Wisio ơi, mở bài Nơi này có anh đi!"*
+  - *"Bật bài Baby Shark vui nhộn nha!"*
+  - *"Mở bài Chú voi con ở Bản Đôn đi Wisio!"*
+- **Trải nghiệm mới:**
+  - **Thông báo ngay lập tức:** Wisio nhận diện bài hát và cất giọng thông báo chuẩn xác: *"Wisio tìm thấy bài [Tên bài hát] rồi nè, chúng mình cùng nghe nhé!"*.
+  - **Màn hình LCD sang trọng:** Hiển thị trọn vẹn **ảnh bìa Thumbnail** của bài hát.
+  - **Không còn lỗi mất chữ tiếng Việt:** Tiêu đề bài hát hiển thị sạch sẽ, chuẩn chữ hoa/thường, không bao giờ bị nuốt chữ hay lỗi font.
+  - **Thanh tiến trình đồng màu thông minh:** Vạch tiến trình chạy mượt mà sát mép dưới, **tự động đổi màu theo màu chủ đạo của ảnh bìa**.
+  - **Thời gian to, rõ nét ở giữa:** Hiển thị trực quan thời lượng phát $\mathbf{00:16\ /\ 04:28}$.
+  - **Dừng nhạc linh hoạt:** Bé có thể ra lệnh *"Wisio dừng nhạc lại"*, hoặc chạm vào màn hình cảm ứng, hoặc bấm nút BOOT để tạm dừng.
 
-### 🎵 Nghe Nhạc Thiếu Nhi & Giải Trí (Kèm Ảnh Bìa & Thông Báo):
-- *"Wisio ơi mở bài Baby Shark nha!"*
-- *"Phát bài Simp Gái 808 của Low G đi Wisio!"*
-- *"Mở bài Chú voi con ở Bản Đôn đi!"*
-- **Trải nghiệm thông minh:**
-  1. Ngay khi nhận lệnh, màn hình hiển thị biểu tượng tìm kiếm.
-  2. Khi tìm thấy bài hát, Wisio cất giọng thông báo thân thiện: *"Wisio tìm thấy bài [Tên bài] rồi nè, chúng mình cùng nghe nhé!"*.
-  3. Màn hình robot hiển thị **ảnh bìa / thumbnail** của bài hát kèm tiêu đề và ca sĩ.
-  4. Nhạc tự động phát mượt mà qua loa.
-  5. Khi muốn dừng, chỉ cần nhấn nút BOOT hoặc chạm vào màn hình cảm ứng!
-  6. Sau khi bài hát kết thúc tự nhiên, Wisio sẽ nhẹ nhàng hỏi bé có muốn nghe tiếp không.
+### 🎨 2. Thẻ Học Từ Vựng Trực Quan (Tự Động Minh Họa Tranh Ảnh):
+- Khi bé học tiếng Anh hoặc hỏi về một sự vật:
+  - *"Con voi tiếng Anh là gì vậy Wisio?"*
+  - *"Dạy bé từ quả táo đi!"*
+  - *"Con hổ, máy bay, xe cứu hỏa đọc sao?"*
+- **Trải nghiệm:** Wisio phát âm chuẩn bản ngữ, hướng dẫn bé đánh vần, đồng thời **màn hình LCD lập tức hiện bức ảnh minh họa sắc nét** giúp bé ghi nhớ sâu bằng thị giác.
 
-### 🧠 Trò Chuyện & Ghi Nhớ Thói Quen Của Bé:
-- *"Bé tên là Bo, bé 6 tuổi, bé thích màu xanh lá!"*
-  $\rightarrow$ Wisio sẽ tự động lưu vào bộ nhớ lâu dài: ngày mai khi bật lại, Wisio sẽ chào bé Bo và nhắc đến màu xanh lá yêu thích của bé!
-- Nhận biết cảm xúc: Khi bé buồn khóc hoặc mệt mỏi sau giờ học, Wisio biết hạ giọng êm ái để vỗ về, an ủi bé.
+### 🧠 3. Ghi Nhớ Cá Nhân Hóa & Cảnh Báo An Toàn:
+- **Ghi nhớ sở thích:** *"Bé tên là An, bé 5 tuổi, bé thích màu vàng!"* $\rightarrow$ Wisio tự lưu lại và ngày mai sẽ gọi đúng tên bé, nhắc về đồ chơi màu vàng bé thích.
+- **Hộp thư an toàn phụ huynh:** Khi bé có biểu hiện lo lắng hoặc nhắc đến các tình huống nguy hiểm, hệ thống sẽ tự động gửi email cảnh báo ấm áp đến hòm thư của ba mẹ.
 
 ---
 
-## 6. Xử Lý Sự Cố Thường Gặp (Troubleshooting)
+## ❓ 7. XỬ LÝ SỰ CỐ THƯỜNG GẶP (FAQ & TROUBLESHOOTING)
 
-| Tình Huống | Nguyên Nhân Có Thể | Cách Khắc Phục |
+| Vấn Đề | Nguyên Nhân | Cách Xử Lý |
 | :--- | :--- | :--- |
-| **Console báo "API key not valid"** | API Key Google sao chép bị thừa khoảng trắng hoặc chưa kích hoạt | Lấy lại key mới tại Google AI Studio và dán lại chính xác. |
-| **Robot không kết nối được tới Bridge** | Máy tính và Robot khác dải mạng Wi-Fi hoặc tường lửa Windows chặn cổng 8000 | Kiểm tra xem máy tính và robot đã cùng bắt 1 mạng Wi-Fi chưa; cho phép Python giao tiếp qua Windows Defender Firewall (Private Network). |
-| **Màn hình không hiện ảnh** | Mất kết nối Internet hoặc từ khóa quá trừu tượng | Đảm bảo máy tính có kết nối Internet; Wisio hỗ trợ hơn 200+ chủ đề danh từ trực quan quen thuộc của bé. |
-| **Muốn đổi mạng Wi-Fi khác** | Robot đã lưu cấu hình mạng cũ | Nhấn giữ nút BOOT trên bo mạch trong 5 giây để xóa cấu hình và đưa robot về lại trang Captive Portal. |
+| **Không mở được cổng COM khi nạp** | Có phần mềm khác đang giữ cổng (VS Code Serial Monitor, PuTTY...) | Đóng tất cả terminal Serial Monitor, rút cáp USB ra cắm lại và chạy lại `FLASH_FIRMWARE.cmd`. |
+| **Lỗi "Brownout detector was triggered"** | Cáp USB quá dài, chất lượng kém hoặc cổng USB máy tính bị sụt nguồn | Đổi sang cáp Type-C ngắn có chống nhiễu, cắm vào cổng USB 3.0 (màu xanh) phía sau thùng máy hoặc dùng nguồn phụ 5V-2A. |
+| **Robot không kết nối được tới Bridge** | Máy tính và robot đang bắt 2 mạng Wi-Fi khác nhau hoặc Firewall chặn | Đảm bảo cả hai kết nối cùng một tên Wi-Fi (băng tần 2.4GHz). Bật cho phép Python trong Windows Defender Firewall (Private Network). |
+| **Muốn đổi sang mạng Wi-Fi khác** | Robot đang lưu cấu hình Wi-Fi cũ | Nhấn giữ nút **BOOT** trên bo mạch trong 5 giây cho đến khi robot phát lại Wi-Fi `Wisio-Setup`. |
+| **Báo lỗi "API Key not valid"** | Nhập sai mã Gemini API Key | Kiểm tra và copy lại API Key từ Google AI Studio, dán lại vào console hoặc cập nhật trong file `bridge/.env`. |
+
+---
+
+Chúc toàn bộ đội ngũ và các bé có những giờ phút học tập, giải trí tràn đầy niềm vui cùng **Robot AI Wisio**! 🚀✨
