@@ -886,10 +886,12 @@ class MusicController:
         # to leave the robot speaker. Never use a listen event to start it early.
         if self.is_playing():
             track = self.current
+            t_title = (getattr(track, "display_title", "") or track.title) if track else ""
+            t_artist = (getattr(track, "display_artist", "") or track.artist) if track else ""
             await self._send_music_event(
                 "start", self.current_token,
-                title=track.title if track else "",
-                artist=track.artist if track else "",
+                title=t_title,
+                artist=t_artist,
                 duration_ms=self._duration_ms(track),
             )
 
@@ -1034,8 +1036,10 @@ class MusicController:
         try:
             print(f"Music playback starting: {track.title} - {track.artist}")
             duration_ms = self._duration_ms(track)
+            t_title = getattr(track, "display_title", "") or track.title
+            t_artist = getattr(track, "display_artist", "") or track.artist
             await self._send_music_event(
-                "start", token, title=track.title, artist=track.artist,
+                "start", token, title=t_title, artist=t_artist,
                 duration_ms=duration_ms,
             )
             started = True

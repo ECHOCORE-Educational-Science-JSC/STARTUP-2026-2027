@@ -1114,6 +1114,57 @@ void LcdDisplay::ClearChatMessages() {
 }
 #endif
 
+static std::string SanitizeVietnameseForDisplay(const std::string& input) {
+    std::string out;
+    out.reserve(input.size());
+    for (size_t i = 0; i < input.size(); ) {
+        unsigned char c0 = static_cast<unsigned char>(input[i]);
+        if (c0 < 0x80) {
+            out.push_back(input[i++]);
+        } else if (c0 == 0xC4 && i + 1 < input.size()) {
+            unsigned char c1 = static_cast<unsigned char>(input[i + 1]);
+            if (c1 == 0x90) { // Đ -> D
+                out.push_back('D');
+                i += 2;
+            } else {
+                out.push_back(input[i++]);
+            }
+        } else if (c0 == 0xC6 && i + 1 < input.size()) {
+            unsigned char c1 = static_cast<unsigned char>(input[i + 1]);
+            if (c1 == 0xA0) { // Ơ -> O
+                out.push_back('O');
+                i += 2;
+            } else if (c1 == 0xA1) { // ơ -> o
+                out.push_back('o');
+                i += 2;
+            } else if (c1 == 0xAF) { // Ư -> U
+                out.push_back('U');
+                i += 2;
+            } else if (c1 == 0xB0) { // ư -> u
+                out.push_back('u');
+                i += 2;
+            } else {
+                out.push_back(input[i++]);
+            }
+        } else if (c0 == 0xE1 && i + 2 < input.size()) {
+            unsigned char c1 = static_cast<unsigned char>(input[i + 1]);
+            unsigned char c2 = static_cast<unsigned char>(input[i + 2]);
+            if (c1 == 0xBB && c2 >= 0x9A && c2 <= 0xA3) { // Ớ/ờ/Ờ/ở/Ở/ở/Ỡ/ỡ/Ợ/ợ
+                out.push_back((c2 % 2 == 0) ? 'O' : 'o');
+                i += 3;
+            } else if (c1 == 0xBB && c2 >= 0xA8 && c2 <= 0xB1) { // Ứ/ứ/Ừ/ừ/Ử/ử/Ữ/ữ/Ự/ự
+                out.push_back((c2 % 2 == 0) ? 'U' : 'u');
+                i += 3;
+            } else {
+                out.push_back(input[i++]);
+            }
+        } else {
+            out.push_back(input[i++]);
+        }
+    }
+    return out;
+}
+
 void LcdDisplay::ShowMusicPlayer(const std::string& title, const std::string& artist,
                                  uint32_t duration_ms) {
     DisplayLockGuard lock(this);
@@ -1123,15 +1174,15 @@ void LcdDisplay::ShowMusicPlayer(const std::string& title, const std::string& ar
         lv_obj_add_flag(music_cover_image_, LV_OBJ_FLAG_HIDDEN);
     }
     if (music_top_panel_ == nullptr) {
-        // TOP PANEL: 320 x 36px sleek translucent dark bar for title marquee
+        // TOP PANEL: 320 x 36px solid sleek dark bar for title marquee
         music_top_panel_ = lv_obj_create(screen);
         lv_obj_set_size(music_top_panel_, LV_HOR_RES, 36);
         lv_obj_align(music_top_panel_, LV_ALIGN_TOP_MID, 0, 0);
         lv_obj_set_style_radius(music_top_panel_, 0, 0);
         lv_obj_set_style_border_width(music_top_panel_, 0, 0);
         lv_obj_set_style_pad_all(music_top_panel_, 0, 0);
-        lv_obj_set_style_bg_color(music_top_panel_, lv_color_black(), 0);
-        lv_obj_set_style_bg_opa(music_top_panel_, LV_OPA_60, 0);
+        lv_obj_set_style_bg_color(music_top_panel_, lv_color_hex(0x0F172A), 0);
+        lv_obj_set_style_bg_opa(music_top_panel_, LV_OPA_90, 0);
         lv_obj_set_scrollbar_mode(music_top_panel_, LV_SCROLLBAR_MODE_OFF);
 
         music_title_label_ = lv_label_create(music_top_panel_);
@@ -1142,41 +1193,42 @@ void LcdDisplay::ShowMusicPlayer(const std::string& title, const std::string& ar
         lv_obj_align(music_title_label_, LV_ALIGN_CENTER, 0, 0);
     }
     if (music_bottom_panel_ == nullptr) {
-        // BOTTOM PANEL: 320 x 32px sleek translucent dark bar for progress and time
+        // BOTTOM PANEL: 320 x 34px solid sleek dark bar for progress and time
         music_bottom_panel_ = lv_obj_create(screen);
-        lv_obj_set_size(music_bottom_panel_, LV_HOR_RES, 32);
+        lv_obj_set_size(music_bottom_panel_, LV_HOR_RES, 34);
         lv_obj_align(music_bottom_panel_, LV_ALIGN_BOTTOM_MID, 0, 0);
         lv_obj_set_style_radius(music_bottom_panel_, 0, 0);
         lv_obj_set_style_border_width(music_bottom_panel_, 0, 0);
         lv_obj_set_style_pad_all(music_bottom_panel_, 0, 0);
-        lv_obj_set_style_bg_color(music_bottom_panel_, lv_color_black(), 0);
-        lv_obj_set_style_bg_opa(music_bottom_panel_, LV_OPA_60, 0);
+        lv_obj_set_style_bg_color(music_bottom_panel_, lv_color_hex(0x0F172A), 0);
+        lv_obj_set_style_bg_opa(music_bottom_panel_, LV_OPA_90, 0);
         lv_obj_set_scrollbar_mode(music_bottom_panel_, LV_SCROLLBAR_MODE_OFF);
 
-        // Slim 4px modern progress bar
+        // Full-width 3px progress line spanning the top edge of the bottom panel
         music_progress_bar_ = lv_bar_create(music_bottom_panel_);
-        lv_obj_set_size(music_progress_bar_, LV_HOR_RES - 110, 4);
-        lv_obj_align(music_progress_bar_, LV_ALIGN_LEFT_MID, 12, 0);
+        lv_obj_set_size(music_progress_bar_, LV_HOR_RES, 3);
+        lv_obj_align(music_progress_bar_, LV_ALIGN_TOP_MID, 0, 0);
         lv_bar_set_range(music_progress_bar_, 0, 1000);
-        lv_obj_set_style_radius(music_progress_bar_, 2, 0);
+        lv_obj_set_style_radius(music_progress_bar_, 0, 0);
         lv_obj_set_style_bg_color(music_progress_bar_, lv_color_hex(0x334155), 0);
         lv_obj_set_style_bg_opa(music_progress_bar_, LV_OPA_COVER, 0);
-        lv_obj_set_style_radius(music_progress_bar_, 2, LV_PART_INDICATOR);
+        lv_obj_set_style_radius(music_progress_bar_, 0, LV_PART_INDICATOR);
         lv_obj_set_style_bg_color(music_progress_bar_, lv_color_hex(music_accent_color_), LV_PART_INDICATOR);
         lv_obj_set_style_bg_opa(music_progress_bar_, LV_OPA_COVER, LV_PART_INDICATOR);
 
-        // Time label: "00:00 / 03:45"
+        // Centered prominent time label: "00:00 / 04:28"
         music_time_label_ = lv_label_create(music_bottom_panel_);
-        lv_obj_set_width(music_time_label_, 85);
-        lv_obj_set_style_text_align(music_time_label_, LV_TEXT_ALIGN_RIGHT, 0);
-        lv_obj_set_style_text_color(music_time_label_, lv_color_hex(0xE2E8F0), 0);
-        lv_obj_align(music_time_label_, LV_ALIGN_RIGHT_MID, -12, 0);
+        lv_obj_set_width(music_time_label_, LV_HOR_RES - 20);
+        lv_obj_set_style_text_align(music_time_label_, LV_TEXT_ALIGN_CENTER, 0);
+        lv_obj_set_style_text_color(music_time_label_, lv_color_hex(0xF8FAFC), 0);
+        lv_obj_align(music_time_label_, LV_ALIGN_CENTER, 0, 2);
     }
 
     std::string display_title = title;
     if (!artist.empty() && artist != "YouTube" && title.find(artist) == std::string::npos) {
         display_title = title + " - " + artist;
     }
+    display_title = SanitizeVietnameseForDisplay(display_title);
     lv_label_set_text(music_title_label_, display_title.c_str());
     lv_bar_set_value(music_progress_bar_, 0, LV_ANIM_OFF);
     char total[16];

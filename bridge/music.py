@@ -27,6 +27,8 @@ class Track:
     http_headers: dict[str, str] = field(default_factory=dict)
     thumbnail_url: str = ""
     duration: float = 0.0
+    display_title: str = ""
+    display_artist: str = ""
 
 
 class MusicError(Exception):
@@ -61,11 +63,114 @@ def _uploader(entry: dict) -> str:
                entry.get("uploader") or entry.get("channel") or "").strip()
 
 
+VN_FONT_FALLBACK = {
+    'Ă': 'A',  # U+0102
+    'Đ': 'D',  # U+0110
+    'Ĩ': 'I',  # U+0128
+    'ĩ': 'i',  # U+0129
+    'Ũ': 'U',  # U+0168
+    'ũ': 'u',  # U+0169
+    'Ơ': 'O',  # U+01A0
+    'ơ': 'o',  # U+01A1
+    'Ư': 'U',  # U+01AF
+    'ư': 'u',  # U+01B0
+    'Ạ': 'A',  # U+1EA0
+    'Ả': 'A',  # U+1EA2
+    'Ấ': 'A',  # U+1EA4
+    'Ầ': 'A',  # U+1EA6
+    'Ẩ': 'A',  # U+1EA8
+    'ẩ': 'a',  # U+1EA9
+    'Ẫ': 'A',  # U+1EAA
+    'ẫ': 'a',  # U+1EAB
+    'Ậ': 'A',  # U+1EAC
+    'Ắ': 'A',  # U+1EAE
+    'Ằ': 'A',  # U+1EB0
+    'ằ': 'a',  # U+1EB1
+    'Ẳ': 'A',  # U+1EB2
+    'ẳ': 'a',  # U+1EB3
+    'Ẵ': 'A',  # U+1EB4
+    'ẵ': 'a',  # U+1EB5
+    'Ặ': 'A',  # U+1EB6
+    'ặ': 'a',  # U+1EB7
+    'Ẹ': 'E',  # U+1EB8
+    'ẹ': 'e',  # U+1EB9
+    'Ẻ': 'E',  # U+1EBA
+    'Ẽ': 'E',  # U+1EBC
+    'Ế': 'E',  # U+1EBE
+    'Ề': 'E',  # U+1EC0
+    'ề': 'e',  # U+1EC1
+    'Ể': 'E',  # U+1EC2
+    'Ễ': 'E',  # U+1EC4
+    'ễ': 'e',  # U+1EC5
+    'Ệ': 'E',  # U+1EC6
+    'Ỉ': 'I',  # U+1EC8
+    'ỉ': 'i',  # U+1EC9
+    'Ị': 'I',  # U+1ECA
+    'Ọ': 'O',  # U+1ECC
+    'ọ': 'o',  # U+1ECD
+    'Ỏ': 'O',  # U+1ECE
+    'ỏ': 'o',  # U+1ECF
+    'Ố': 'O',  # U+1ED0
+    'Ồ': 'O',  # U+1ED2
+    'Ổ': 'O',  # U+1ED4
+    'ổ': 'o',  # U+1ED5
+    'Ỗ': 'O',  # U+1ED6
+    'Ộ': 'O',  # U+1ED8
+    'Ớ': 'O',  # U+1EDA
+    'Ờ': 'O',  # U+1EDC
+    'Ở': 'O',  # U+1EDE
+    'Ỡ': 'O',  # U+1EE0
+    'ỡ': 'o',  # U+1EE1
+    'Ợ': 'O',  # U+1EE2
+    'Ụ': 'U',  # U+1EE4
+    'Ủ': 'U',  # U+1EE6
+    'Ứ': 'U',  # U+1EE8
+    'ứ': 'u',  # U+1EE9
+    'Ừ': 'U',  # U+1EEA
+    'ừ': 'u',  # U+1EEB
+    'Ử': 'U',  # U+1EEC
+    'Ữ': 'U',  # U+1EEE
+    'ữ': 'u',  # U+1EEF
+    'Ự': 'U',  # U+1EF0
+    'ự': 'u',  # U+1EF1
+    'Ỳ': 'Y',  # U+1EF2
+    'ỳ': 'y',  # U+1EF3
+    'Ỵ': 'Y',  # U+1EF4
+    'ỵ': 'y',  # U+1EF5
+    'Ỷ': 'Y',  # U+1EF6
+    'ỷ': 'y',  # U+1EF7
+    'Ỹ': 'Y',  # U+1EF8
+    'ỹ': 'y',  # U+1EF9
+}
+
+
+def make_font_safe(text: str) -> str:
+    """Map Vietnamese characters missing in LCD basic font to safe base letters."""
+    return ''.join(VN_FONT_FALLBACK.get(c, c) for c in text)
+
+
+def clean_artist_name(raw_artist: str) -> str:
+    """Clean channel and management noise from artist names."""
+    artist = str(raw_artist or "").strip()
+    if not artist:
+        return ""
+    import re
+    artist = re.sub(
+        r"\s*(?:official\s*(?:channel|music|vevo)?|channel|\-\s*topic|vevo|entertainment|records)\s*$",
+        "",
+        artist,
+        flags=re.IGNORECASE,
+    ).strip()
+    return artist or str(raw_artist or "").strip()
+
+
 def clean_track_title(raw_title: str, artist: str = "") -> str:
     """Extract canonical song name by removing YouTube noise and clickbait tags."""
     title = str(raw_title or "").strip()
     if not title:
         return ""
+
+    import re
 
     # Remove square brackets, parentheses, curly braces containing noisy tags
     tag_pattern = (
@@ -96,33 +201,45 @@ def clean_track_title(raw_title: str, artist: str = "") -> str:
         r"chính\s*thức"
         r")\s*[\)\]\}]"
     )
-    import re
     title = re.sub(tag_pattern, "", title, flags=re.IGNORECASE)
 
     # Remove pipe segments that are junk
+    junk_re = re.compile(
+        r"^(?:"
+        r"official\s*(?:music\s*)?video|"
+        r"official\s*mv|"
+        r"official\s*audio|"
+        r"official|"
+        r"mv\s*4k|"
+        r"mv|"
+        r"audio|"
+        r"lyrics?|"
+        r"visualizer|"
+        r"nhạc\s*thiếu\s*nhi.*|"
+        r"nhạc\s*sống.*|"
+        r"nhạc\s*trẻ.*|"
+        r"hot\s*tiktok.*|"
+        r"tik\s*tok.*"
+        r")$",
+        re.IGNORECASE,
+    )
+    clean_art = clean_artist_name(artist) if artist else ""
     if "|" in title:
         parts = [p.strip() for p in title.split("|") if p.strip()]
-        junk_part = re.compile(
-            r"^(?:"
-            r"official\s*(?:music\s*)?video|"
-            r"official\s*mv|"
-            r"official\s*audio|"
-            r"official|"
-            r"mv|"
-            r"audio|"
-            r"lyrics?|"
-            r"visualizer|"
-            r"nhạc\s*thiếu\s*nhi.*|"
-            r"nhạc\s*sống.*|"
-            r"nhạc\s*trẻ.*|"
-            r"hot\s*tiktok.*|"
-            r"tik\s*tok.*"
-            r")$",
-            re.IGNORECASE,
-        )
-        kept = [p for p in parts if not junk_part.match(p)]
-        if kept:
-            title = kept[0] if len(kept) == 1 else " - ".join(kept[:2])
+        valid_parts = [p for p in parts if not junk_re.match(p)]
+        if len(valid_parts) == 1:
+            title = valid_parts[0]
+        elif len(valid_parts) >= 2:
+            if clean_art:
+                p0, p1 = valid_parts[0], valid_parts[1]
+                if clean_art.casefold() in p0.casefold() or p0.casefold() in clean_art.casefold():
+                    title = p1
+                elif clean_art.casefold() in p1.casefold() or p1.casefold() in clean_art.casefold():
+                    title = p0
+                else:
+                    title = p0
+            else:
+                title = " - ".join(valid_parts[:2])
 
     # Remove trailing hyphen tags e.g. "- Official MV" or "- Nhạc Thiếu Nhi Sôi Động..."
     title = re.sub(
@@ -132,10 +249,25 @@ def clean_track_title(raw_title: str, artist: str = "") -> str:
         flags=re.IGNORECASE,
     )
 
+    if clean_art and " - " in title:
+        parts = [p.strip() for p in title.split(" - ") if p.strip()]
+        if len(parts) == 2:
+            p0, p1 = parts[0], parts[1]
+            if clean_art.casefold() in p0.casefold() or p0.casefold() in clean_art.casefold():
+                title = p1
+            elif clean_art.casefold() in p1.casefold() or p1.casefold() in clean_art.casefold():
+                title = p0
+
+    if title.isupper() and len(title) > 3:
+        title = title.title()
+        for acr in ("M-Tp", "M-tp", "Mv", "Edm", "Dj", "Mc", "Remix", "Vip"):
+            title = re.sub(r'\b' + re.escape(acr) + r'\b', acr.upper() if acr.lower() != "m-tp" else "M-TP", title)
+
     # Clean whitespace and boundary punctuation
     title = title.strip(' "\' -:')
     title = re.sub(r"\s+", " ", title).strip()
     return title or str(raw_title).strip()
+
 
 
 def search_track(query: str) -> Track:
@@ -192,20 +324,24 @@ def search_track(query: str) -> Track:
         raise MusicError(f"Không tìm thấy bài phù hợp với ‘{query}’. Bé thử tìm bài khác xem sao nhé!")
     raw_track = str(entry.get("track") or "").strip()
     raw_title = str(entry.get("title") or query).strip()
-    artist = _uploader(entry) or "YouTube"
+    clean_art = clean_artist_name(_uploader(entry)) or "YouTube"
     if raw_track:
-        title = clean_track_title(raw_track, artist) or raw_track
+        title = clean_track_title(raw_track, clean_art) or raw_track
     else:
-        title = clean_track_title(raw_title, artist) or raw_title
+        title = clean_track_title(raw_title, clean_art) or raw_title
     thumbnail_url = str(entry.get("thumbnail") or "").strip()
     duration = float(entry.get("duration") or 0.0)
     return Track(
-        str(entry.get("id") or ""), title, artist,
+        str(entry.get("id") or ""),
+        title,
+        clean_art,
         str(entry.get("url") or ""),
         str(entry.get("webpage_url") or entry.get("original_url") or ""),
         {str(k): str(v) for k, v in (entry.get("http_headers") or {}).items()},
         thumbnail_url=thumbnail_url,
         duration=duration,
+        display_title=make_font_safe(title),
+        display_artist=make_font_safe(clean_art),
     )
 
 
