@@ -286,7 +286,43 @@ def _ffmpeg_executable() -> str:
         raise LearningImageError("Bridge còn thiếu bộ xử lý hình ảnh.") from exc
 
 
-def _pil_make_small_png(source: bytes) -> bytes | None:
+def extract_vibrant_accent_color(im) -> str:
+    """Extract a vibrant, high-contrast accent color from the image for the music progress bar."""
+    try:
+        from PIL import Image
+        small = im.resize((32, 24), Image.Resampling.BOX).convert("RGB")
+        colors = small.getcolors(32 * 24) or []
+        best_color = None
+        best_score = -1.0
+        for count, (r, g, b) in colors:
+            lum = 0.299 * r + 0.587 * g + 0.114 * b
+            if lum < 35 or lum > 250:
+                continue
+            max_c = max(r, g, b)
+            min_c = min(r, g, b)
+            if max_c == 0:
+                continue
+            sat = (max_c - min_c) / max_c
+            lum_score = max(0.1, 1.0 - abs(lum - 150) / 150.0)
+            score = (sat ** 1.3) * (lum_score ** 0.8) * (1.0 + (count / (32 * 24)) * 0.5)
+            if score > best_score:
+                best_score = score
+                best_color = (r, g, b)
+        if best_color is not None and best_score > 0.04:
+            r, g, b = best_color
+            lum = 0.299 * r + 0.587 * g + 0.114 * b
+            if lum < 120:
+                scale = 140 / max(1, lum)
+                r = min(255, int(r * scale))
+                g = min(255, int(g * scale))
+                b = min(255, int(b * scale))
+            return f"#{r:02X}{g:02X}{b:02X}"
+    except Exception:
+        pass
+    return "#38BDF8"
+
+
+def _pil_make_small_png(source: bytes) -> tuple[bytes, str] | None:
     try:
         from PIL import Image, ImageOps
         im = Image.open(io.BytesIO(source))
@@ -300,6 +336,7 @@ def _pil_make_small_png(source: bytes) -> bytes | None:
         else:
             im_rgb = im.convert("RGB")
             fitted = ImageOps.fit(im_rgb, (320, 240), method=Image.Resampling.LANCZOS, centering=(0.5, 0.5))
+        accent_color = extract_vibrant_accent_color(fitted)
         buf = io.BytesIO()
         fitted.save(buf, format="PNG", optimize=True)
         png = buf.getvalue()
@@ -308,14 +345,14 @@ def _pil_make_small_png(source: bytes) -> bytes | None:
             fitted.convert("P", palette=Image.Palette.ADAPTIVE, colors=256).save(buf, format="PNG", optimize=True)
             png = buf.getvalue()
         if png.startswith(b"\x89PNG\r\n\x1a\n") and len(png) <= MAX_PNG_BYTES:
-            return png
+            return png, accent_color
     except Exception:
         pass
     return None
 
 
-def make_small_png(source: bytes) -> bytes:
-    """Convert arbitrary web artwork to a small palette PNG for the ESP32 display (full-bleed 320x240 cover)."""
+def make_small_png_with_accent(source: bytes) -> tuple[bytes, str]:
+    """Convert artwork to 320x240 PNG and return (png_bytes, accent_color_hex)."""
     pil_result = _pil_make_small_png(source)
     if pil_result is not None:
         return pil_result
@@ -341,7 +378,12 @@ def make_small_png(source: bytes) -> bytes:
         raise LearningImageError("Hình tìm được không đọc được.")
     if len(png) > MAX_PNG_BYTES:
         raise LearningImageError("Hình minh họa sau khi xử lý vẫn quá lớn.")
-    return png
+    return png, "#38BDF8"
+
+
+def make_small_png(source: bytes) -> bytes:
+    """Convert arbitrary web artwork to a small palette PNG for the ESP32 display (full-bleed 320x240 cover)."""
+    return make_small_png_with_accent(source)[0]
 
 
 def verify_image_subject(png: bytes, query: str, word: str, api_key: str) -> None:

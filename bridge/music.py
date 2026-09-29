@@ -61,6 +61,83 @@ def _uploader(entry: dict) -> str:
                entry.get("uploader") or entry.get("channel") or "").strip()
 
 
+def clean_track_title(raw_title: str, artist: str = "") -> str:
+    """Extract canonical song name by removing YouTube noise and clickbait tags."""
+    title = str(raw_title or "").strip()
+    if not title:
+        return ""
+
+    # Remove square brackets, parentheses, curly braces containing noisy tags
+    tag_pattern = (
+        r"[\(\[\{]\s*(?:"
+        r"official\s*(?:music\s*)?video|"
+        r"official\s*mv|"
+        r"official\s*audio|"
+        r"audio\s*official|"
+        r"official|"
+        r"mv\s*4k|"
+        r"mv|"
+        r"4k|"
+        r"hd|"
+        r"full\s*hd|"
+        r"audio|"
+        r"lyrics?|"
+        r"lyric\s*video|"
+        r"lyrics\s*video|"
+        r"visualizer|"
+        r"nhạc\s*thiếu\s*nhi[^)\]}]*|"
+        r"bản\s*chuẩn|"
+        r"video\s*clip|"
+        r"performance\s*video|"
+        r"karaoke|"
+        r"beat|"
+        r"teaser|"
+        r"trailer|"
+        r"chính\s*thức"
+        r")\s*[\)\]\}]"
+    )
+    import re
+    title = re.sub(tag_pattern, "", title, flags=re.IGNORECASE)
+
+    # Remove pipe segments that are junk
+    if "|" in title:
+        parts = [p.strip() for p in title.split("|") if p.strip()]
+        junk_part = re.compile(
+            r"^(?:"
+            r"official\s*(?:music\s*)?video|"
+            r"official\s*mv|"
+            r"official\s*audio|"
+            r"official|"
+            r"mv|"
+            r"audio|"
+            r"lyrics?|"
+            r"visualizer|"
+            r"nhạc\s*thiếu\s*nhi.*|"
+            r"nhạc\s*sống.*|"
+            r"nhạc\s*trẻ.*|"
+            r"hot\s*tiktok.*|"
+            r"tik\s*tok.*"
+            r")$",
+            re.IGNORECASE,
+        )
+        kept = [p for p in parts if not junk_part.match(p)]
+        if kept:
+            title = kept[0] if len(kept) == 1 else " - ".join(kept[:2])
+
+    # Remove trailing hyphen tags e.g. "- Official MV" or "- Nhạc Thiếu Nhi Sôi Động..."
+    title = re.sub(
+        r"\s*-\s*(?:official\s*(?:music\s*)?video|official\s*mv|official\s*audio|official|mv\s*4k|mv|audio|lyric(?:s)?(?:\s*video)?|visualizer|nhạc\s*(?:thiếu\s*nhi|trẻ|sống|chế|vàng|trữ\s*tình|sôi\s*động).*|top\s*hit.*|hot\s*tiktok.*)\s*$",
+        "",
+        title,
+        flags=re.IGNORECASE,
+    )
+
+    # Clean whitespace and boundary punctuation
+    title = title.strip(' "\' -:')
+    title = re.sub(r"\s+", " ", title).strip()
+    return title or str(raw_title).strip()
+
+
 def search_track(query: str) -> Track:
     """Resolve the best matching YouTube audio result without downloading it."""
     query = query.strip()
@@ -108,13 +185,18 @@ def search_track(query: str) -> Track:
                               ("reaction", "cover", "karaoke", "remix")) else 0
         candidates.append((overlap + title_overlap * 0.35 - penalty, entry))
     if not candidates:
-        raise MusicError(f"Không tìm thấy bài phù hợp với ‘{query}’.")
+        raise MusicError(f"Không tìm thấy bài phù hợp với ‘{query}’. Bé thử tìm bài khác xem sao nhé!")
 
     score, entry = max(candidates, key=lambda item: item[0])
     if score <= 0.1:
-        raise MusicError(f"Không tìm thấy bài phù hợp với ‘{query}’.")
-    title = str(entry.get("track") or entry.get("title") or query).strip()
+        raise MusicError(f"Không tìm thấy bài phù hợp với ‘{query}’. Bé thử tìm bài khác xem sao nhé!")
+    raw_track = str(entry.get("track") or "").strip()
+    raw_title = str(entry.get("title") or query).strip()
     artist = _uploader(entry) or "YouTube"
+    if raw_track:
+        title = clean_track_title(raw_track, artist) or raw_track
+    else:
+        title = clean_track_title(raw_title, artist) or raw_title
     thumbnail_url = str(entry.get("thumbnail") or "").strip()
     duration = float(entry.get("duration") or 0.0)
     return Track(

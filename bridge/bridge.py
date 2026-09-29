@@ -31,6 +31,7 @@ from urllib.parse import quote
 import websockets
 import music
 import learning_image
+import learning_session
 import guardian_alert
 
 
@@ -134,7 +135,8 @@ SYSTEM_INSTRUCTION = (
     "their identity is clear. "
     "When asked to play a song, call play_song immediately with its title and artist if known. "
     "A spoken promise is not execution: never end the turn with only a promise or claim to play. "
-    "Do not speak before calling play_song. After the tool succeeds remain silent because music has started. "
+    "Do not speak before calling play_song. After the tool succeeds, say exactly one short Vietnamese sentence "
+    "confirming the verified title, then remain silent. Music starts only after that sentence finishes. "
     "If the tool returns an error, briefly explain it aloud in Vietnamese and invite bé to try another song. "
     "Do not speak again while the music is playing. When the bridge reports that a song ended naturally, ask "
     "one short, friendly Vietnamese question about whether the user wants to hear another song. "
@@ -773,13 +775,15 @@ async def end_audio_after_pause(gemini, speech_state: dict, diagnostic: Diagnost
 
 class PacedPlayback:
     """Keep a short audio lead on the robot, then deliver frames at playback rate."""
-    def __init__(self, device, encoder, codec, session_id, version, stats, max_pending=0):
+    def __init__(self, device, encoder, codec, session_id, version, stats, max_pending=0,
+                 progress_callback=None):
         self.device, self.encoder, self.codec = device, encoder, codec
         self.session_id, self.version, self.stats = session_id, version, stats
         self.queue = asyncio.Queue(maxsize=max_pending)
         self.sent_frames = 0
         self.underruns = 0
         self.first_packet_sent = asyncio.Event()
+        self.progress_callback = progress_callback
         self.speaking_ready_at = asyncio.get_running_loop().time() + SPEAKING_SETTLE_SECONDS
         self.task = asyncio.create_task(self.run())
 
@@ -811,6 +815,10 @@ class PacedPlayback:
             self.stats["output_frames"] += 1
             self.sent_frames += 1
             self.first_packet_sent.set()
+            if self.progress_callback is not None:
+                result = self.progress_callback(self.sent_frames)
+                if asyncio.iscoroutine(result):
+                    await result
         next_at = loop.time() + FRAME_MS / 1000
         while not end_received:
             frame = await self.queue.get()
@@ -824,6 +832,10 @@ class PacedPlayback:
             await self.device.send(pack_audio(self.codec.encode(self.encoder, frame), self.version))
             self.stats["output_frames"] += 1
             self.sent_frames += 1
+            if self.progress_callback is not None:
+                result = self.progress_callback(self.sent_frames)
+                if asyncio.iscoroutine(result):
+                    await result
             # Keep the schedule tied to the audio clock. Adding a fresh full
             # frame after every send slowly drains the robot's playback lead.
             next_at = max(next_at + FRAME_MS / 1000, loop.time())
@@ -858,6 +870,10 @@ class MusicController:
         self.first_frame = None
         self.playback_ready = asyncio.Event()
         self.searching = False
+        self.playback_sequence = 0
+        self.pending_token = None
+        self.current_token = None
+        self.cover_task = None
 
     def is_active(self) -> bool:
         return self.searching or self.pending is not None or (self.task is not None and not self.task.done())
@@ -869,25 +885,52 @@ class MusicController:
         # A selected track may still be waiting for Gemini's spoken sentence
         # to leave the robot speaker. Never use a listen event to start it early.
         if self.is_playing():
-            await send_json(self.device, {"type": "music", "state": "start",
-                                          "session_id": self.session_id})
+            track = self.current
+            await self._send_music_event(
+                "start", self.current_token,
+                title=track.title if track else "",
+                artist=track.artist if track else "",
+                duration_ms=self._duration_ms(track),
+            )
 
-    async def _send_cover_art(self, track: music.Track):
+    @staticmethod
+    def _duration_ms(track: music.Track | None) -> int:
+        return max(0, int((track.duration if track else 0.0) * 1000))
+
+    def _new_playback_token(self) -> str:
+        self.playback_sequence += 1
+        return str(self.playback_sequence)
+
+    async def _send_music_event(self, state: str, token: str | None, **fields):
+        if self.device is None:
+            return
+        payload = {
+            "type": "music",
+            "state": state,
+            "session_id": self.session_id,
+            "playback_token": token or "",
+        }
+        payload.update(fields)
+        await send_json(self.device, payload)
+
+    async def _send_cover_art(self, track: music.Track, token: str):
         try:
             url = getattr(track, "thumbnail_url", "")
             if not url or self.device is None:
                 return
             data = await asyncio.to_thread(learning_image._read_url, url, 4 * 1024 * 1024, 6)
-            png = await asyncio.to_thread(learning_image.make_small_png, data)
+            png, accent_color = await asyncio.to_thread(learning_image.make_small_png_with_accent, data)
             if png and self.device is not None:
                 await send_json(self.device, {
-                    "type": "learning_image",
+                    "type": "music",
+                    "state": "cover",
                     "session_id": self.session_id,
-                    "word": track.title[:32],
+                    "playback_token": token,
                     "mime_type": "image/png",
+                    "accent_color": accent_color,
                     "data": base64.b64encode(png).decode("ascii"),
                 })
-                print(f"Cover art sent to robot display: {track.title} ({len(png)} bytes)")
+                print(f"Cover art sent to robot display: {track.title} ({len(png)} bytes, accent={accent_color})")
         except Exception as exc:
             print(f"Cover art display skipped: {exc}")
 
@@ -904,11 +947,6 @@ class MusicController:
                 return self.current
         await self.stop()
         self.searching = True
-        # Lock the microphone and show the speaking/music indicator while the
-        # provider searches. This keeps bridge state and the robot UI in sync.
-        if self.device is not None:
-            await send_json(self.device, {"type": "music", "state": "start",
-                                          "session_id": self.session_id})
         try:
             async with asyncio.timeout(12):
                 track = await asyncio.to_thread(music.search_track, query)
@@ -917,23 +955,16 @@ class MusicController:
         except (TimeoutError, StopAsyncIteration) as exc:
             self.searching = False
             await self.stop()
-            if self.device is not None:
-                await send_json(self.device, {"type": "music", "state": "stop",
-                                              "session_id": self.session_id})
             raise music.MusicError("Chưa mở được bài hát lúc này, bé thử bài khác nhé.") from exc
         except Exception:
             self.searching = False
             await self.stop()
-            if self.device is not None:
-                await send_json(self.device, {"type": "music", "state": "stop",
-                                              "session_id": self.session_id})
             raise
         finally:
             self.searching = False
         print(f"Music found: {track.title} - {track.artist}")
         self.pending = track
-        if getattr(track, "thumbnail_url", ""):
-            asyncio.create_task(self._send_cover_art(track))
+        self.pending_token = self._new_playback_token()
         return track
 
     async def schedule_pending(self, delay: float = MUSIC_AFTER_SPEECH_DELAY_SECONDS):
@@ -969,15 +1000,20 @@ class MusicController:
         self.current = None
         if track is not None:
             self.pending = track
+            self.pending_token = self._new_playback_token()
         print("Music deferred until Gemini finishes speaking")
 
     async def start_pending(self):
         if self.pending is None:
             return
         track, self.pending = self.pending, None
+        token, self.pending_token = self.pending_token, None
+        if not token:
+            token = self._new_playback_token()
         self.current = track
+        self.current_token = token
         self.playback_ready.clear()
-        self.task = asyncio.create_task(self._play(track))
+        self.task = asyncio.create_task(self._play(track, token))
         ready = asyncio.create_task(self.playback_ready.wait())
         task = self.task
         try:
@@ -989,21 +1025,41 @@ class MusicController:
             ready.cancel()
             await asyncio.gather(ready, return_exceptions=True)
 
-    async def _play(self, track: music.Track):
+    async def _play(self, track: music.Track, token: str):
         playback = None
         started = False
         completed = False
         failure = None
+        last_progress_second = -1
         try:
             print(f"Music playback starting: {track.title} - {track.artist}")
-            await send_json(self.device, {"type": "music", "state": "start",
-                                          "session_id": self.session_id})
+            duration_ms = self._duration_ms(track)
+            await self._send_music_event(
+                "start", token, title=track.title, artist=track.artist,
+                duration_ms=duration_ms,
+            )
             started = True
-            await send_json(self.device, {"type": "tts", "state": "sentence_start",
-                                          "session_id": self.session_id,
-                                          "text": f"♪ {track.title} — {track.artist}"})
+            if getattr(track, "thumbnail_url", ""):
+                self.cover_task = asyncio.create_task(self._send_cover_art(track, token))
+
+            async def report_progress(sent_frames: int):
+                nonlocal last_progress_second
+                audible_frames = max(0, sent_frames - PLAYBACK_LEAD_FRAMES)
+                position_ms = audible_frames * FRAME_MS
+                if duration_ms:
+                    position_ms = min(position_ms, duration_ms)
+                second = position_ms // 1000
+                if second == last_progress_second:
+                    return
+                last_progress_second = second
+                await self._send_music_event(
+                    "progress", token, position_ms=position_ms,
+                    duration_ms=duration_ms,
+                )
+
             playback = PacedPlayback(self.device, self.encoder, self.codec,
-                                     self.session_id, self.version, self.stats, max_pending=96)
+                                     self.session_id, self.version, self.stats, max_pending=96,
+                                     progress_callback=report_progress)
             stream, self.prepared_stream = self.prepared_stream, None
             first_frame, self.first_frame = self.first_frame, None
             if first_frame is not None:
@@ -1037,14 +1093,20 @@ class MusicController:
                 await stream.aclose()
             if playback is not None:
                 await playback.cancel()
+            cover_task, self.cover_task = self.cover_task, None
+            if cover_task is not None:
+                if not cover_task.done():
+                    cover_task.cancel()
+                await asyncio.gather(cover_task, return_exceptions=True)
             if started:
                 try:
-                    await send_json(self.device, {"type": "music", "state": "stop",
-                                                  "session_id": self.session_id})
+                    await self._send_music_event("stop", token)
                 except websockets.exceptions.ConnectionClosed:
                     pass
             if self.current is track:
                 self.current = None
+            if self.current_token == token:
+                self.current_token = None
             if self.task is asyncio.current_task():
                 self.task = None
         if failure is not None and self.on_failure is not None and self.playback_ready.is_set():
@@ -1064,26 +1126,30 @@ class MusicController:
         self.first_frame = None
         was_active = self.pending is not None or self.current is not None or self.start_task is not None
         self.pending = None
+        pending_token, self.pending_token = self.pending_token, None
         scheduled, self.start_task = self.start_task, None
         if scheduled is not None and scheduled is not asyncio.current_task():
             scheduled.cancel()
             await asyncio.gather(scheduled, return_exceptions=True)
         task, self.task = self.task, None
+        current_token = self.current_token
         self.current = None
         if task is not None:
             task.cancel()
             await asyncio.gather(task, return_exceptions=True)
         elif was_active and self.device is not None:
-            await send_json(self.device, {"type": "music", "state": "stop",
-                                          "session_id": self.session_id})
+            await self._send_music_event("stop", current_token or pending_token)
+        self.current_token = None
 
 
-async def gemini_output(gemini, device, encoder, codec: Opus, session_id: str, version: int, stats: dict, speech_state: dict, one_turn=False, music_controller=None, memory_store=None, guardian_alerter=None, image_api_key=""):
+async def gemini_output(gemini, device, encoder, codec: Opus, session_id: str, version: int, stats: dict, speech_state: dict, one_turn=False, music_controller=None, memory_store=None, guardian_alerter=None, image_api_key="", learning_visual_state=None):
     audio_buffer = bytearray()
     reply_capture = bytearray() if os.getenv("XIAOZHI_DIAGNOSTIC") == "1" else None
     speaking = False
     spoke_this_turn = False
     suppress_audio_this_turn = False
+    if learning_visual_state is None:
+        learning_visual_state = learning_session.LearningVisualState()
     emotion_tracker = stats.setdefault("emotion_tracker", EmotionTracker())
     playback = None
     try:
@@ -1110,13 +1176,13 @@ async def gemini_output(gemini, device, encoder, codec: Opus, session_id: str, v
                                 await send_json(device, {"type": "tts", "state": "stop", "session_id": session_id})
                                 speaking = False
                                 stats["assistant_speaking"] = False
-                            await music_controller.start_pending()
                             suppress_audio_this_turn = False
                             result = {"result": (
                                 f"Found '{track.title}' by {track.artist}. "
-                                f"Say warmly in Vietnamese in ONE short, friendly sentence: "
+                                f"MANDATORY: Announce this EXACT verified canonical title in ONE short, friendly sentence: "
                                 f"'Wisio tìm thấy bài {track.title} rồi nè, chúng mình cùng nghe nhé!' "
-                                f"Then remain silent so the music can play."
+                                f"(Do NOT pronounce the user's rough search query). "
+                                f"Do not call any other tool. Music will start immediately after that sentence finishes."
                             )}
                         elif call.get("name") == "stop_music":
                             await music_controller.stop()
@@ -1153,6 +1219,7 @@ async def gemini_output(gemini, device, encoder, codec: Opus, session_id: str, v
                                 "mime_type": "image/png",
                                 "data": base64.b64encode(visual["png"]).decode("ascii"),
                             })
+                            learning_visual_state.mark_image(w or q)
                             print(f"[IMAGE] Sent to robot display successfully!")
                             result = {"result": (
                                 f"The illustration for {w or q} is now visible on the robot screen. "
@@ -1176,6 +1243,7 @@ async def gemini_output(gemini, device, encoder, codec: Opus, session_id: str, v
                 print("Gemini response event:", ", ".join(content.keys()))
             transcript = (content.get("inputTranscription") or {}).get("text")
             if transcript:
+                learning_visual_state.observe_user(transcript)
                 if not stats.get("turn_transcribed"):
                     elapsed = (time.monotonic() - stats["speech_end_at"]
                                if stats.get("speech_end_at") is not None else None)
@@ -1202,6 +1270,7 @@ async def gemini_output(gemini, device, encoder, codec: Opus, session_id: str, v
             if music_playing:
                 spoken_text = ""
             if spoken_text:
+                learning_visual_state.observe_assistant(spoken_text)
                 normalized_output = spoken_text.casefold()
                 normalized_input = str(stats.get("last_input_text", "")).casefold()
                 if ("tây ban nha" in normalized_output or "tiếng spanish" in normalized_output or
@@ -1276,11 +1345,21 @@ async def gemini_output(gemini, device, encoder, codec: Opus, session_id: str, v
                     # defer_for_speech() cancels this timer and the next completed
                     # speech turn rearms it. Voice and music therefore never overlap.
                     await music_controller.schedule_pending()
+                correction_requested = False
                 if content.get("turnComplete"):
+                    correction = learning_visual_state.correction_prompt()
+                    if correction:
+                        await send_json(gemini, {"clientContent": {
+                            "turns": [{"role": "user", "parts": [{"text": correction}]}],
+                            "turnComplete": True,
+                        }})
+                        correction_requested = True
+                    else:
+                        learning_visual_state.finish_turn()
                     spoke_this_turn = False
                     suppress_audio_this_turn = False
                 speech_state.update(new_speech_state())
-                if one_turn and content.get("turnComplete"):
+                if one_turn and content.get("turnComplete") and not correction_requested:
                     break
     finally:
         if playback is not None:

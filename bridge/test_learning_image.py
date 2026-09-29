@@ -121,6 +121,40 @@ class LearningImageTest(unittest.TestCase):
 
 
 class LearningImageToolTest(unittest.IsolatedAsyncioTestCase):
+    async def test_missing_lesson_visual_triggers_one_bounded_correction(self):
+        class Gemini:
+            def __init__(self): self.sent = []
+            def __aiter__(self):
+                async def events():
+                    yield json.dumps({"serverContent": {
+                        "inputTranscription": {"text": "Dạy tiếng Anh cho bé đi"},
+                        "outputTranscription": {"text": "Apple nghĩa là quả táo."},
+                        "turnComplete": True,
+                    }})
+                    yield json.dumps({"serverContent": {"turnComplete": True}})
+                return events()
+            async def send(self, value): self.sent.append(json.loads(value))
+
+        class Device:
+            async def send(self, _value): pass
+
+        class Controller:
+            def is_active(self): return False
+            def is_playing(self): return False
+            async def schedule_pending(self): pass
+
+        gemini = Gemini()
+        await bridge.gemini_output(
+            gemini, Device(), None, None, "session", 1,
+            {"gemini_content_seen": False}, bridge.new_speech_state(), one_turn=True,
+            music_controller=Controller(),
+        )
+        corrections = [message for message in gemini.sent if "clientContent" in message]
+        self.assertEqual(len(corrections), 1)
+        text = corrections[0]["clientContent"]["turns"][0]["parts"][0]["text"]
+        self.assertIn("show_learning_image", text)
+        self.assertIn("apple", text.casefold())
+
     async def test_false_spanish_response_from_noise_is_never_played(self):
         class Gemini:
             def __aiter__(self):

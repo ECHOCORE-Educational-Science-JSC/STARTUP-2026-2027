@@ -805,6 +805,19 @@ void Application::InitializeProtocol() {
                     ESP_LOGW(TAG, "Music cover requires a token and base64 data");
                     return;
                 }
+                auto accent_item = cJSON_GetObjectItem(root, "accent_color");
+                uint32_t accent_color = 0;
+                if (cJSON_IsNumber(accent_item)) {
+                    accent_color = static_cast<uint32_t>(accent_item->valueint);
+                } else if (cJSON_IsString(accent_item) && accent_item->valuestring != nullptr) {
+                    const char* str = accent_item->valuestring;
+                    if (str[0] == '#') {
+                        str++;
+                    } else if (str[0] == '0' && (str[1] == 'x' || str[1] == 'X')) {
+                        str += 2;
+                    }
+                    accent_color = static_cast<uint32_t>(strtoul(str, nullptr, 16));
+                }
                 const size_t encoded_size = strlen(encoded->valuestring);
                 constexpr size_t kMaxEncodedCoverSize = 320 * 1024;
                 constexpr size_t kMaxDecodedCoverSize = 240 * 1024;
@@ -834,7 +847,7 @@ void Application::InitializeProtocol() {
                     heap_caps_free(image_data);
                     return;
                 }
-                Schedule([this, display, token = std::move(token), image_data, decoded_size]() {
+                Schedule([this, display, token = std::move(token), image_data, decoded_size, accent_color]() {
                     std::unique_ptr<void, decltype(&heap_caps_free)> data(image_data,
                                                                           heap_caps_free);
                     if (music_playback_token_ != token) {
@@ -849,6 +862,9 @@ void Application::InitializeProtocol() {
                         auto image = std::make_unique<LvglAllocatedImage>(data.get(), decoded_size);
                         data.release();
                         lvgl_display->SetMusicCover(std::move(image));
+                        if (accent_color != 0) {
+                            lvgl_display->SetMusicAccentColor(accent_color);
+                        }
                     } catch (const std::exception& error) {
                         ESP_LOGE(TAG, "Cannot display music cover: %s", error.what());
                     }
