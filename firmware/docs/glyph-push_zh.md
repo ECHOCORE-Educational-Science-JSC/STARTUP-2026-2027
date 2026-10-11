@@ -39,7 +39,7 @@ MQTT/UDP 使用完全相同的扩展格式。
 | `size` | number | 固件使用的文字字体像素规格。 |
 | `bpp` | number | 字体位图的每像素位数，目前为 `1` 或 `4`。 |
 
-`basic` 是链接进固件的字库。标准小智 assets 从分区加载 common 字库后会报告 `common`。
+`basic` 是链接进固件的字库。标准Wisio assets 从分区加载 common 字库后会报告 `common`。
 服务器必须使用每个连接在 hello 中报告的实际值，不能根据板型推测。
 
 OTA assets 可以把文字字体替换为不同字号、bpp、字符集或字体家族的 CBIN 字体。固件仍会

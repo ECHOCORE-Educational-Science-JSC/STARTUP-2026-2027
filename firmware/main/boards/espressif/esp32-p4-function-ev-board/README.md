@@ -16,7 +16,7 @@ LCD is supported via the official MIPI‑DSI LCD adapter.
 - Fonts: Custom font support with Unicode characters (Vietnamese, Chinese, etc.)
 
 ## Configure
-In `menuconfig`: Xiaozhi Assistant -> Board Type -> ESP32-P4/P4X-Function-EV-Board
+In `menuconfig`: Wisio Assistant -> Board Type -> ESP32-P4/P4X-Function-EV-Board
 
 Ensure these are set (auto-set when building via config.json):
 - `CONFIG_SLAVE_IDF_TARGET_ESP32C6=y`
@@ -45,5 +45,5 @@ idf.py menuconfig
 idf.py build
 ```
 
-Tip: In menuconfig, choose Xiaozhi Assistant -> Board Type -> ESP32-P4/P4X-Function-EV-Board.
+Tip: In menuconfig, choose Wisio Assistant -> Board Type -> ESP32-P4/P4X-Function-EV-Board.
 If building a release via scripts, the `config.json` in this folder appends the required Hosted options.

@@ -6,7 +6,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        This form is for the open-source device firmware. For device unbinding, email [xiaozhi.ai@tenclass.com](mailto:xiaozhi.ai@tenclass.com?subject=Device%20unbinding%20request) privately with the device ID and MAC address. Use the [XiaoZhi AI website](https://xiaozhi.me/) for other account and cloud-service requests.
+        This form is for the open-source device firmware. For device unbinding, email [wisio.ai@tenclass.com](mailto:wisio.ai@tenclass.com?subject=Device%20unbinding%20request) privately with the device ID and MAC address. Use the [Wisio AI website](https://xiaozhi.me/) for other account and cloud-service requests.
 
   - type: checkboxes
     id: checklist
@@ -39,7 +39,7 @@ body:
     attributes:
       label: Firmware source or filename
       description: State where the firmware came from and include its filename or board target when available.
-      placeholder: ex. xiaozhi.me, GitHub release echoear.bin, self-built target df-k10, or vendor firmware
+      placeholder: ex. wisio.me, GitHub release echoear.bin, self-built target df-k10, or vendor firmware
     validations:
       required: true
 

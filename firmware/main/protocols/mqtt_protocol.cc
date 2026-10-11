@@ -237,6 +237,7 @@ void MqttProtocol::CloseAudioChannel(bool send_goodbye) {
 }
 
 bool MqttProtocol::OpenAudioChannel() {
+    ResetServerGreeting();
     if (mqtt_ == nullptr || !mqtt_->IsConnected()) {
         ESP_LOGI(TAG, "MQTT is not connected, try to connect now");
         if (!StartMqttClient(true)) {
@@ -380,6 +381,8 @@ void MqttProtocol::ParseServerHello(const cJSON* root) {
         ESP_LOGE(TAG, "Unsupported or missing transport");
         return;
     }
+
+    ParseServerGreeting(root);
 
     auto session_id = cJSON_GetObjectItem(root, "session_id");
     if (cJSON_IsString(session_id)) {

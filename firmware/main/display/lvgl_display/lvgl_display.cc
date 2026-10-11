@@ -304,6 +304,15 @@ void LvglDisplay::SetPreviewImage(std::unique_ptr<LvglImage> image) {}
 
 void LvglDisplay::SetMusicCover(std::unique_ptr<LvglImage> image) {}
 
+void LvglDisplay::ShowMusicPlayerWithCover(const std::string& title, const std::string& artist,
+                                           uint32_t duration_ms, std::unique_ptr<LvglImage> image,
+                                           uint32_t accent_color) {
+    // Non-LCD LVGL displays retain their optional music behavior.
+    ShowMusicPlayer(title, artist, duration_ms);
+    SetMusicAccentColor(accent_color);
+    SetMusicCover(std::move(image));
+}
+
 void LvglDisplay::SetPowerSaveMode(bool on) {
     if (on) {
         SetChatMessage("system", "");

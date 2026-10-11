@@ -30,7 +30,7 @@ SAFE_REPORTED_IDENTIFIER = re.compile(r"^[a-z0-9][a-z0-9.-]*$")
 SAFE_JOB_ID = re.compile(r"^[a-z0-9][a-z0-9.-]*$")
 SAFE_WAKE_WORD = re.compile(r"^(?:disabled|nihaoxiaozhi|wn9[sl]?_[a-z0-9_]+)$")
 ARTIFACTS = {
-    "ota": Path("build/xiaozhi.bin"),
+    "ota": Path("build/wisio.bin"),
     "full": Path("build/merged-binary.bin"),
 }
 UPLOAD_MAX_ATTEMPTS = 4
@@ -65,7 +65,7 @@ def upload_config() -> dict[str, str] | None:
 def parser() -> argparse.ArgumentParser:
     result = argparse.ArgumentParser(
         description=(
-            "Build one XiaoZhi firmware board configuration. Arguments may also "
+            "Build one Wisio firmware board configuration. Arguments may also "
             "be supplied through FIRMWARE_BOARD_DIR, FIRMWARE_BOARD_NAME, "
             "FIRMWARE_LANGUAGE, FIRMWARE_WAKE_WORD, and "
             "FIRMWARE_BUILD_OPTIONS."
@@ -83,7 +83,7 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument(
         "--source-dir",
         type=Path,
-        default=Path(env("FIRMWARE_SOURCE_DIR") or "/opt/xiaozhi-esp32"),
+        default=Path(env("FIRMWARE_SOURCE_DIR") or "/opt/wisio-esp32"),
     )
     result.add_argument(
         "--output-dir",
@@ -277,7 +277,7 @@ def failure_summary(log_path: Path) -> str:
     meaningful = [
         line for line in lines
         if line
-        and not line.startswith(("XIAOZHI_STAGE ", "XIAOZHI_SOURCE_REVISION "))
+        and not line.startswith(("WISIO_STAGE ", "WISIO_SOURCE_REVISION "))
     ]
     patterns = (
         re.compile(r"(?:fatal error|error:|ValueError:|RuntimeError:|FileNotFoundError:)", re.I),
@@ -444,7 +444,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     write_manifest(args.output_dir, manifest)
     if artifact_upload_config is not None:
         try:
-            print("XIAOZHI_STAGE uploading", flush=True)
+            print("WISIO_STAGE uploading", flush=True)
             upload_outputs(args.output_dir, manifest, artifact_upload_config)
         except Exception as error:
             print(f"firmware-builder: artifact upload failed: {error}", file=sys.stderr)

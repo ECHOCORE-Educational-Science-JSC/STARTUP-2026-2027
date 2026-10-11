@@ -547,7 +547,7 @@ private:
                 #elif defined(CONFIG_LANGUAGE_KO_KR)
                     region = "KR";
                 #endif
-                printf("{\"type\":0,\"name\":\"VER?\",\"code\":0,\"data\":{\"software\":\"%s\",\"hardware\":\"watcher xiaozhi agent\",\"camera\":%d,\"region\":\"%s\"}}\n",
+                printf("{\"type\":0,\"name\":\"VER?\",\"code\":0,\"data\":{\"software\":\"%s\",\"hardware\":\"watcher wisio agent\",\"camera\":%d,\"region\":\"%s\"}}\n",
                        app_desc->version,
                        self->GetCamera() == nullptr ? 0 : 1,
                        region);

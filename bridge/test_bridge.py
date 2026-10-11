@@ -43,6 +43,23 @@ def writable_test_dir():
 
 
 class BridgeTest(unittest.IsolatedAsyncioTestCase):
+    async def test_end_of_speech_marks_robot_as_processing(self):
+        class Peer:
+            def __init__(self): self.sent = []
+            async def send(self, value): self.sent.append(json.loads(value))
+
+        gemini, device = Peer(), Peer()
+        state = bridge.new_speech_state()
+        state.update({"started": True, "closed": False})
+        stats = {"speech_end_at": None}
+        with patch.object(bridge, "MIC_STREAM_PAUSE_SECONDS", 0):
+            await bridge.end_audio_after_pause(
+                gemini, device, "session", state,
+                bridge.DiagnosticCapture(False), stats)
+        self.assertIn({"realtimeInput": {"activityEnd": {}}}, gemini.sent)
+        self.assertIn({"type": "listen", "state": "stop", "session_id": "session"},
+                      device.sent)
+
     def test_bridge_discovery_returns_current_lan_endpoint(self):
         probe = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         probe.bind(("127.0.0.1", 0))
@@ -64,7 +81,7 @@ class BridgeTest(unittest.IsolatedAsyncioTestCase):
                 payload, _ = client.recvfrom(256)
             self.assertEqual(
                 payload,
-                b"WISIO_BRIDGE_V1 http://192.168.1.25:8003/xiaozhi/ota/",
+                b"WISIO_BRIDGE_V1 http://192.168.1.25:8003/wisio/ota/",
             )
         finally:
             stop.set()
@@ -203,13 +220,13 @@ class BridgeTest(unittest.IsolatedAsyncioTestCase):
         device_port = device_server.sockets[0].getsockname()[1]
         try:
             with writable_test_dir() as temp_dir, \
-                 patch.dict(os.environ, {"XIAOZHI_DIAGNOSTIC": "1"}), \
+                 patch.dict(os.environ, {"WISIO_DIAGNOSTIC": "1"}), \
                  patch.object(bridge, "GEMINI_ENDPOINT", f"ws://127.0.0.1:{mock_port}/gemini"), \
                  patch.object(bridge, "MIC_STREAM_PAUSE_SECONDS", 0.05), \
                  patch.object(bridge, "DIAGNOSTIC_WAIT_SECONDS", 0.05), \
                  patch.object(bridge, "DIAGNOSTIC_REPLY_WAV", os.path.join(temp_dir, "reply.wav")), \
                  patch.object(bridge, "DIAGNOSTIC_WAV", os.path.join(temp_dir, "mic.wav")):
-                async with websockets.connect(f"ws://127.0.0.1:{device_port}/xiaozhi/v1/") as device:
+                async with websockets.connect(f"ws://127.0.0.1:{device_port}/wisio/v1/") as device:
                     await bridge.send_json(device, {
                         "type": "hello", "transport": "websocket", "version": 1,
                         "audio_params": {"sample_rate": 16000},
@@ -405,6 +422,38 @@ class BridgeTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(playback.sent_frames, bridge.PLAYBACK_LEAD_FRAMES + 1)
         self.assertGreater(playback.underruns, 0)
 
+    async def test_music_prepare_tries_another_result_when_first_stream_is_dead(self):
+        """One unplayable Audius result must not make the whole request fail."""
+        first = bridge.music.Track("dead", "Requested song", "Artist", "dead-url")
+        second = bridge.music.Track("working", "Requested song", "Artist", "working-url")
+        searches = []
+
+        def search(query, excluded_ids=None):
+            searches.append((query, set(excluded_ids or ())))
+            return first if not excluded_ids else second
+
+        def frames(track, frame_bytes):
+            async def stream():
+                if track.id == "dead":
+                    raise bridge.music.MusicError("dead stream")
+                yield bytes(frame_bytes)
+            return stream()
+
+        controller = bridge.MusicController(None, None, None, "test", 1,
+                                            {"output_frames": 0})
+        with patch.object(bridge, "music_setup_problem", return_value=None), \
+             patch.object(bridge.music, "search_track", side_effect=search), \
+             patch.object(bridge.music, "pcm_frames", side_effect=frames):
+            selected = await controller.prepare("Requested song")
+
+        self.assertEqual(selected.id, "working")
+        self.assertEqual(searches, [
+            ("Requested song", set()),
+            ("Requested song", {"dead"}),
+        ])
+        self.assertEqual(controller.first_frame, bytes(bridge.OUTPUT_SAMPLES * 2))
+        await controller.stop()
+
     async def test_gemini_close_releases_listening_device(self):
         codec = bridge.Opus(PY_OPUS)
 
@@ -421,7 +470,7 @@ class BridgeTest(unittest.IsolatedAsyncioTestCase):
         device_port = device_server.sockets[0].getsockname()[1]
         try:
             with patch.object(bridge, "GEMINI_ENDPOINT", f"ws://127.0.0.1:{mock_port}/gemini"):
-                async with websockets.connect(f"ws://127.0.0.1:{device_port}/xiaozhi/v1/") as device:
+                async with websockets.connect(f"ws://127.0.0.1:{device_port}/wisio/v1/") as device:
                     await bridge.send_json(device, {
                         "type": "hello", "transport": "websocket", "version": 1,
                         "audio_params": {"sample_rate": 16000},
@@ -441,7 +490,9 @@ class BridgeTest(unittest.IsolatedAsyncioTestCase):
         for index in range(1, 35):
             level = 360 if index == 6 else 180
             self.assertFalse(bridge.update_speech_state(state, level, index * 0.06))
-        self.assertTrue(bridge.update_speech_state(state, 180, 36 * 0.06))
+        ended_at = next(index for index in range(35, 53)
+                        if bridge.update_speech_state(state, 180, index * 0.06))
+        self.assertGreaterEqual(ended_at, 49)
 
     async def test_thinking_pause_does_not_cut_the_sentence(self):
         state = bridge.new_speech_state()
@@ -451,7 +502,26 @@ class BridgeTest(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(bridge.update_speech_state(state, 560, 0.66))
         for index in range(12, 46):
             self.assertFalse(bridge.update_speech_state(state, 150, index * 0.06))
-        self.assertTrue(bridge.update_speech_state(state, 150, 47 * 0.06))
+        for index in range(46, 61):
+            self.assertFalse(bridge.update_speech_state(state, 150, index * 0.06))
+        self.assertTrue(bridge.update_speech_state(state, 150, 62 * 0.06))
+
+    async def test_long_sentence_allows_a_three_second_thinking_pause(self):
+        state = bridge.new_speech_state()
+        for index in range(150):
+            self.assertFalse(bridge.update_speech_state(state, 650, index * 0.06))
+        for index in range(150, 199):
+            self.assertFalse(bridge.update_speech_state(state, 150, index * 0.06))
+        self.assertFalse(bridge.update_speech_state(state, 650, 199 * 0.06))
+
+    async def test_long_sentence_allows_a_four_second_thinking_pause(self):
+        state = bridge.new_speech_state()
+        for index in range(150):
+            self.assertFalse(bridge.update_speech_state(state, 650, index * 0.06))
+        for index in range(150, 217):
+            self.assertFalse(bridge.update_speech_state(state, 150, index * 0.06))
+        self.assertFalse(bridge.update_speech_state(state, 650, 217 * 0.06))
+
 
     async def test_vietnam_time_is_exact_utc_plus_seven(self):
         utc = bridge.datetime(2026, 9, 23, 1, 2, 3, tzinfo=bridge.timezone.utc)
@@ -509,13 +579,18 @@ class BridgeTest(unittest.IsolatedAsyncioTestCase):
             instruction = setup["setup"]["systemInstruction"]["parts"][0]["text"]
             self.assertIn("complete the entire requested range", instruction)
             self.assertIn("RESPOND IN VIETNAMESE BY DEFAULT", instruction)
-            self.assertIn("only when the user speaks to you in English", instruction)
-            self.assertIn("at most three or four short spoken sentences", instruction)
+            self.assertIn("During English practice, model English examples", instruction)
+            self.assertNotIn("warmth, Vietnamese accent", instruction,
+                             'Keeping the Wisio voice must not force a Vietnamese accent on English')
+            self.assertIn("Voice identity is separate from language-specific pronunciation", instruction)
+            self.assertIn("Do not switch an English-only activity to Vietnamese", instruction)
+            self.assertTrue("For a child's explanatory question, use five to eight short spoken sentences" in instruction,
+                            'Live setup must include the fuller child-friendly explanation policy')
             self.assertIn("Asia/Ho_Chi_Minh", instruction)
             self.assertIn("interactive CEFR A1-B2 English tutor", instruction)
             self.assertIn("OWNER-PROVIDED PRODUCT BEHAVIOR SPECIFICATION", instruction)
-            self.assertIn("BẠN LÀ AI? (IDENTITY)", instruction)
-            self.assertIn("CÂU HỎI CHỦ ĐỘNG PHẢI CỤ THỂ VÀ CÓ ÍCH", instruction)
+            self.assertIn("giáo viên tiếng Anh và bạn đồng hành cho bé 6–14 tuổi", instruction)
+            self.assertIn("Không hỏi nhiều câu cùng lúc", instruction)
             self.assertIn("sleep quality, hydration, eye breaks, posture", instruction)
             self.assertIn("not a chatbot", instruction)
             self.assertIn("asking one friendly, specific question at a time", instruction)
@@ -561,8 +636,10 @@ class BridgeTest(unittest.IsolatedAsyncioTestCase):
         )
         device_port = device_server.sockets[0].getsockname()[1]
         try:
-            with patch.object(bridge, "GEMINI_ENDPOINT", f"ws://127.0.0.1:{mock_port}/gemini"):
-                async with websockets.connect(f"ws://127.0.0.1:{device_port}/xiaozhi/v1/") as device:
+            with writable_test_dir() as test_dir, \
+                 patch.object(bridge, "MEMORY_FILE", Path(test_dir) / "memory.json"), \
+                 patch.object(bridge, "GEMINI_ENDPOINT", f"ws://127.0.0.1:{mock_port}/gemini"):
+                async with websockets.connect(f"ws://127.0.0.1:{device_port}/wisio/v1/") as device:
                     await bridge.send_json(device, {
                         "type": "hello", "transport": "websocket", "version": 1,
                         "audio_params": {"sample_rate": 16000},
@@ -604,9 +681,9 @@ class BridgeTest(unittest.IsolatedAsyncioTestCase):
             ota_thread.start()
             try:
                 port = ota.server_address[1]
-                with urllib.request.urlopen(f"http://127.0.0.1:{port}/xiaozhi/ota/") as response:
+                with urllib.request.urlopen(f"http://127.0.0.1:{port}/wisio/ota/") as response:
                     result = json.load(response)
-                self.assertEqual(result["websocket"]["url"], "ws://192.168.100.7:8000/xiaozhi/v1/")
+                self.assertEqual(result["websocket"]["url"], "ws://192.168.100.7:8000/wisio/v1/")
                 self.assertEqual(result["server_time"]["timezone_offset"], 420)
                 self.assertEqual(result["server_time"]["timezone"], "Asia/Ho_Chi_Minh")
             finally:

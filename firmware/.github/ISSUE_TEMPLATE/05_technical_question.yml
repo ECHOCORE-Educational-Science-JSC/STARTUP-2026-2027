@@ -6,7 +6,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        This form is for technical questions about the open-source firmware. For device unbinding, email [xiaozhi.ai@tenclass.com](mailto:xiaozhi.ai@tenclass.com?subject=Device%20unbinding%20request) privately with the device ID and MAC address. Other account and cloud-service requests belong on the [XiaoZhi AI website](https://xiaozhi.me/).
+        This form is for technical questions about the open-source firmware. For device unbinding, email [wisio.ai@tenclass.com](mailto:wisio.ai@tenclass.com?subject=Device%20unbinding%20request) privately with the device ID and MAC address. Other account and cloud-service requests belong on the [Wisio AI website](https://xiaozhi.me/).
 
   - type: checkboxes
     id: checklist

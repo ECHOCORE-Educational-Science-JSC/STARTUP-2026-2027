@@ -20,13 +20,13 @@ idf.py menuconfig
 **选择板子：**
 
 ```
-Xiaozhi Assistant -> Target Board -> WDMomo ESP32-CGC
+Wisio Assistant -> Target Board -> WDMomo ESP32-CGC
 ```
 
 **选择屏幕类型：**
 
 ```
-Xiaozhi Assistant -> LCD Type -> "ST7735, 分辨率128*128"
+Wisio Assistant -> LCD Type -> "ST7735, 分辨率128*128"
 ```
 
 **编译：**

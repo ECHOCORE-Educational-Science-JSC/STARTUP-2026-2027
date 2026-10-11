@@ -42,7 +42,7 @@ extern "C" {
  *              @endcode
  *
  * @note Configuration dependency:
- *       - When CONFIG_XIAOZHI_ENABLE_HARDWARE_JPEG_DECODER is enabled, hardware acceleration is attempted first
+ *       - When CONFIG_WISIO_ENABLE_HARDWARE_JPEG_DECODER is enabled, hardware acceleration is attempted first
  *       - Both hardware and software paths allocate memory that requires heap_caps_free() for deallocation
  *       - The decoded image format is always RGB565 (2 bytes per pixel)
  *

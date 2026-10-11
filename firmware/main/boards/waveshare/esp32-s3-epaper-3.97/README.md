@@ -13,7 +13,7 @@ git clone https://github.com/78/xiaozhi-esp32.git
 **进入工程**
 
 ```bash
-cd xiaozhi-esp32
+cd wisio-esp32
 ```
 
 **配置编译目标为 ESP32S3**
@@ -31,7 +31,7 @@ idf.py menuconfig
 **选择板子**
 
 ```bash
-Xiaozhi Assistant -> Board Type -> Waveshare ESP32-S3-ePaper-3.97
+Wisio Assistant -> Board Type -> Waveshare ESP32-S3-ePaper-3.97
 ```
 
 **编译**

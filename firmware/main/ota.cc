@@ -49,7 +49,7 @@ std::string Ota::GetCheckVersionUrl() {
         // TEST-NET-1 is deliberately non-routable. A distributable image must
         // never contain the developer's LAN address; users provision their PC
         // bridge URL in the Wi-Fi portal before normal use.
-        url = "http://192.0.2.1/echocore/ota/";
+        url = "http://192.0.2.1/wisio/ota/";
 #else
         url = CONFIG_OTA_URL;
 #endif

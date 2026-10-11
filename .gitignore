@@ -1,40 +1,33 @@
-# Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
-*$py.class
-
-# Virtual environments & vendored packages
 .venv/
-venv/
-env/
-bridge/vendor/
+vendor/
 *.egg-info/
 .pytest_cache/
-
-# Firmware build artifacts
 firmware/build/
+firmware/test-tmp/
 firmware/managed_components/
-firmware/dependencies.lock
+firmware/components/
 firmware/sdkconfig
 firmware/sdkconfig.old
-firmware/.clangd/
+firmware/releases/
 firmware/main/assets/lang_config.h
 firmware/main/mmap_generate_*.h
-firmware/releases/
-firmware/tmp/
-firmware/dist/
-
-# Logs & temp audio
 *.log
 *.wav
-tmp/
+.tmp/
+tmp*/
+test-tmp/
 .cache/
-.DS_Store
-Thumbs.db
-
-# Secrets & environment configurations
+image-cache/
 .env
 .env.*
 !.env.example
 *.pem
 *.key
+.wisio*_secret*
+.wisio_alert_sender
+bridge_secrets.cmd
+wisio_memory.json
+.DS_Store
+Thumbs.db

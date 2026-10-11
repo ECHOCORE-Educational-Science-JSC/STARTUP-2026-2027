@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <functional>
+#include <mutex>
 
 #include <driver/gpio.h>
 #include <esp_timer.h>
@@ -14,6 +15,7 @@ public:
 
     void RestoreBrightness();
     void SetBrightness(uint8_t brightness, bool permanent = false);
+    void SetPowerSaveMode(bool on);
     inline uint8_t brightness() const { return brightness_; }
 
 protected:
@@ -24,6 +26,8 @@ protected:
     uint8_t brightness_ = 0;
     uint8_t target_brightness_ = 0;
     uint8_t step_ = 1;
+    bool power_save_ = false;
+    std::mutex transition_mutex_;
 };
 
 

@@ -65,7 +65,7 @@ list(APPEND SOURCES
     "boards/common/sy6970.cc"
     "boards/common/system_reset.cc"
 )
-if(CONFIG_XIAOZHI_NETWORK_ETHERNET)
+if(CONFIG_WISIO_NETWORK_ETHERNET)
     list(APPEND SOURCES "boards/common/ethernet_board.cc")
 endif()
 list(APPEND INCLUDE_DIRS ${CMAKE_CURRENT_SOURCE_DIR}/boards/common)

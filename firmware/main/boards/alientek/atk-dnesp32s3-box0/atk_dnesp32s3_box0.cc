@@ -32,7 +32,7 @@ private:
     LcdStatus LcdStatus_ = kDevicelcdbacklightOn;
     PowerSleep power_sleep_ = kDeviceNoSleep;
     WakeStatus wake_status_ = kDeviceAwakened;
-    XiaozhiStatus XiaozhiStatus_ = kDevice_Exit_Distributionnetwork;
+    WisioStatus WisioStatus_ = kDevice_Exit_Distributionnetwork;
     esp_timer_handle_t wake_timer_handle_;
     esp_lcd_panel_io_handle_t panel_io = nullptr;
     esp_lcd_panel_handle_t panel = nullptr;
@@ -134,7 +134,7 @@ private:
         power_save_timer_ = new PowerSaveTimer(-1, 60, 300);
         power_save_timer_->OnEnterSleepMode([this]() {
             power_sleep_ = kDeviceNeutralSleep;
-            XiaozhiStatus_ = kDevice_join_Sleep;
+            WisioStatus_ = kDevice_join_Sleep;
             GetDisplay()->SetPowerSaveMode(true);
 
             if (LcdStatus_ != kDevicelcdbacklightOff) {
@@ -145,7 +145,7 @@ private:
             power_sleep_ = kDeviceNoSleep;
             GetDisplay()->SetPowerSaveMode(false);
 
-            if (XiaozhiStatus_ != kDevice_Exit_Sleep) {
+            if (WisioStatus_ != kDevice_Exit_Sleep) {
                 GetBacklight()->RestoreBrightness();
             }
         });
@@ -212,15 +212,15 @@ private:
                 wake_status_ = kDeviceWaitWake;
             }
 
-            if (XiaozhiStatus_ == kDevice_Distributionnetwork || XiaozhiStatus_ == kDevice_Exit_Sleep) {
+            if (WisioStatus_ == kDevice_Distributionnetwork || WisioStatus_ == kDevice_Exit_Sleep) {
                 esp_timer_stop(power_manager_->timer_handle_);
                 gpio_set_level(CHG_CTRL_PIN, 0);
                 vTaskDelay(pdMS_TO_TICKS(100));
                 gpio_set_level(SYS_POW_PIN, 0);
                 vTaskDelay(pdMS_TO_TICKS(100));
-            } else if (XiaozhiStatus_ == kDevice_join_Sleep) {
+            } else if (WisioStatus_ == kDevice_join_Sleep) {
                 GetBacklight()->RestoreBrightness();
-                XiaozhiStatus_ = kDevice_null;
+                WisioStatus_ = kDevice_null;
             }
         });
 
@@ -234,11 +234,11 @@ private:
             if (app.GetDeviceState() != kDeviceStateStarting || app.GetDeviceState() == kDeviceStateWifiConfiguring) {
                 if (app.GetDeviceState() == kDeviceStateWifiConfiguring && power_status_ != kDeviceTypecSupply) {
                     GetBacklight()->SetBrightness(0);
-                    XiaozhiStatus_ = kDevice_Distributionnetwork;
+                    WisioStatus_ = kDevice_Distributionnetwork;
                 } else if (power_status_ == kDeviceBatterySupply && LcdStatus_ != kDevicelcdbacklightOff) {
                     Application::GetInstance().StartListening();
                     GetBacklight()->SetBrightness(0);   
-                    XiaozhiStatus_ = kDevice_Exit_Sleep;
+                    WisioStatus_ = kDevice_Exit_Sleep;
                 } else if (power_status_ == kDeviceTypecSupply && LcdStatus_ == kDevicelcdbacklightOn && Application::GetInstance().GetDeviceState() != kDeviceStateStarting) {
                     Application::GetInstance().StartListening();
                     GetBacklight()->SetBrightness(0);

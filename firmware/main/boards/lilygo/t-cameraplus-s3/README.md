@@ -21,9 +21,9 @@ idf.py menuconfig
 **Select the board**
 
 ```
-Xiaozhi Assistant -> Board Type -> LILYGO T-CameraPlus-S3_V1_0_V1_1
+Wisio Assistant -> Board Type -> LILYGO T-CameraPlus-S3_V1_0_V1_1
 Or
-Xiaozhi Assistant -> Board Type -> LILYGO T-CameraPlus-S3_V1_2
+Wisio Assistant -> Board Type -> LILYGO T-CameraPlus-S3_V1_2
 ```
 
 **Modify the psram configuration**

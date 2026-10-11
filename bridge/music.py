@@ -9,6 +9,11 @@ from pathlib import Path
 import subprocess
 import sys
 import unicodedata
+import json
+import re
+import shutil
+from urllib.parse import urlencode
+from urllib.request import Request, urlopen
 
 
 # Keep dependencies beside the bridge so no global Python install is modified.
@@ -29,18 +34,18 @@ class Track:
     duration: float = 0.0
     display_title: str = ""
     display_artist: str = ""
+    provider: str = "audius"
 
 
 class MusicError(Exception):
     pass
 
 
+AUDIUS_API = "https://api.audius.co/v1"
+
+
 def runtime_problem() -> str | None:
     missing = []
-    try:
-        import yt_dlp  # noqa: F401
-    except ImportError:
-        missing.append("bộ tìm nhạc")
     try:
         import imageio_ffmpeg
         if not os.path.isfile(imageio_ffmpeg.get_ffmpeg_exe()):
@@ -61,6 +66,175 @@ def _words(value: str) -> set[str]:
 def _uploader(entry: dict) -> str:
     return str(entry.get("artist") or entry.get("creator") or
                entry.get("uploader") or entry.get("channel") or "").strip()
+
+
+def _match_score(title: str, artist: str, requested: set[str]) -> float:
+    title_words = _words(title)
+    combined = title_words | _words(artist)
+    overlap = len(requested & combined) / max(1, len(requested))
+    title_overlap = len(requested & title_words) / max(1, len(requested))
+    lowered = title.casefold()
+    penalty = 0.35 if any(word in lowered for word in
+                          ("reaction", "cover", "karaoke", "remix")) else 0
+    return overlap + title_overlap * 0.35 - penalty
+
+
+def _is_relevant_match(title: str, artist: str, requested: set[str],
+                       generic_request: bool) -> bool:
+    if generic_request:
+        return True
+    selected_words = _words(title) | _words(artist)
+    coverage = len(requested & selected_words) / max(1, len(requested))
+    return coverage >= 0.75
+
+
+def _search_audius_track(query: str, requested: set[str],
+                         generic_request: bool,
+                         excluded_ids: set[str] | None = None) -> Track | None:
+    """Search Audius' public catalog for a playable matching track."""
+    params = urlencode({"query": query, "limit": 10})
+    request = Request(
+        f"{AUDIUS_API}/tracks/search?{params}",
+        headers={"Accept": "application/json", "User-Agent": "Wisio-EchoCore/1.0"},
+    )
+    try:
+        with urlopen(request, timeout=6) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except (OSError, TimeoutError, ValueError, json.JSONDecodeError):
+        raise MusicError("Không kết nối được nguồn nhạc Audius lúc này. Bé thử lại sau nhé.") from None
+
+    candidates: list[tuple[float, dict]] = []
+    excluded_ids = excluded_ids or set()
+    for entry in (payload or {}).get("data") or []:
+        if (not entry or entry.get("is_stream_gated") or
+                str(entry.get("id") or "") in excluded_ids):
+            continue
+        title = str(entry.get("title") or "").strip()
+        user = entry.get("user") or {}
+        artist = str(user.get("name") or user.get("handle") or "").strip()
+        track_id = str(entry.get("id") or "").strip()
+        if not title or not track_id:
+            continue
+        duration = float(entry.get("duration") or 0.0)
+        playable_bonus = 0.15 if duration == 0 or duration >= 45 else -0.4
+        candidates.append((_match_score(title, artist, requested) + playable_bonus, entry))
+    if not candidates:
+        return None
+
+    score, entry = max(candidates, key=lambda item: item[0])
+    user = entry.get("user") or {}
+    artist = str(user.get("name") or user.get("handle") or "Audius").strip()
+    title = str(entry.get("title") or query).strip()
+    if (not generic_request and score <= 0.1) or not _is_relevant_match(
+            title, artist, requested, generic_request):
+        return None
+    track_id = str(entry.get("id"))
+    artwork = entry.get("artwork") or {}
+    thumbnail_url = str(
+        artwork.get("480x480") or artwork.get("1000x1000") or
+        artwork.get("150x150") or ""
+    ).strip()
+    permalink = str(entry.get("permalink") or "").strip()
+    if permalink.startswith("/"):
+        permalink = "https://audius.co" + permalink
+    clean_artist = clean_artist_name(artist) or "Audius"
+    clean_title = clean_track_title(title, clean_artist) or title
+    return Track(
+        track_id,
+        clean_title,
+        clean_artist,
+        f"{AUDIUS_API}/tracks/{track_id}/stream",
+        permalink,
+        thumbnail_url=thumbnail_url,
+        duration=float(entry.get("duration") or 0.0),
+        display_title=clean_title,
+        display_artist=clean_artist,
+        provider="audius",
+    )
+
+
+class _ExtractorLog:
+    # yt-dlp otherwise prints raw extractor URLs and errors to the voice console.
+    def debug(self, message): pass
+    def warning(self, message): pass
+    def error(self, message): pass
+
+
+def _youtube_options(flat: bool = False) -> dict:
+    runtimes = {}
+    for name in ("deno", "node"):
+        executable = shutil.which(name)
+        if executable:
+            runtimes[name] = {"path": executable}
+    return {
+        "quiet": True, "no_warnings": True, "logger": _ExtractorLog(),
+        "skip_download": True, "noplaylist": True,
+        "extract_flat": flat, "format": "bestaudio/best",
+        "socket_timeout": 4, "retries": 0, "extractor_retries": 0,
+        "js_runtimes": runtimes,
+        "cachedir": str(Path(__file__).with_name(".cache") / "youtube"),
+    }
+
+
+def _youtube_track(info: dict) -> Track | None:
+    video_id = str(info.get("id") or "")
+    stream = str(info.get("url") or "")
+    if (not re.fullmatch(r"[\w-]{11}", video_id, flags=re.ASCII) or
+            not stream.startswith(("https://", "http://")) or
+            info.get("is_live") or (info.get("age_limit") or 0) >= 18 or
+            info.get("has_drm")):
+        return None
+    artist = clean_artist_name(_uploader(info))
+    title = clean_track_title(str(info.get("title") or ""), artist)
+    if not title:
+        return None
+    return Track(
+        video_id, title, artist, stream,
+        f"https://www.youtube.com/watch?v={video_id}",
+        http_headers=dict(info.get("http_headers") or {}),
+        thumbnail_url=str(info.get("thumbnail") or ""),
+        duration=float(info.get("duration") or 0),
+        display_title=title, display_artist=artist, provider="youtube")
+
+
+def _search_youtube_track(query: str, requested: set[str], generic_request: bool,
+                          excluded_ids: set[str]) -> Track | None:
+    try:
+        import yt_dlp
+    except ImportError:
+        raise MusicError("Thiếu thành phần YouTube. Chạy setup_bridge.cmd để cài lại.") from None
+    try:
+        with yt_dlp.YoutubeDL(_youtube_options(flat=True)) as extractor:
+            results = extractor.extract_info(f"ytsearch8:{query}", download=False) or {}
+    except Exception:
+        raise MusicError("Không kết nối được nguồn nhạc YouTube lúc này.") from None
+    candidates = []
+    for entry in results.get("entries") or []:
+        if not entry:
+            continue
+        video_id = str(entry.get("id") or "")
+        title, artist = str(entry.get("title") or ""), _uploader(entry)
+        if (not re.fullmatch(r"[\w-]{11}", video_id, flags=re.ASCII) or
+                video_id in excluded_ids or entry.get("is_live") or
+                (entry.get("age_limit") or 0) >= 18 or
+                entry.get("availability") in ("private", "premium_only", "subscriber_only") or
+                not _is_relevant_match(title, artist, requested, generic_request)):
+            continue
+        candidates.append((_match_score(title, artist, requested), video_id))
+    # Resolve only the best few matching videos, skipping a removed/unplayable one.
+    for _, video_id in sorted(candidates, reverse=True, key=lambda item: item[0])[:3]:
+        try:
+            with yt_dlp.YoutubeDL(_youtube_options()) as extractor:
+                info = extractor.extract_info(
+                    f"https://www.youtube.com/watch?v={video_id}", download=False) or {}
+            track = _youtube_track(info)
+            if track and _is_relevant_match(track.title, track.artist, requested, generic_request):
+                return track
+        except Exception:
+            continue
+    if candidates:
+        raise MusicError("Các video YouTube phù hợp hiện không cung cấp âm thanh phát được.")
+    return None
 
 
 VN_FONT_FALLBACK = {
@@ -165,7 +339,7 @@ def clean_artist_name(raw_artist: str) -> str:
 
 
 def clean_track_title(raw_title: str, artist: str = "") -> str:
-    """Extract canonical song name by removing YouTube noise and clickbait tags."""
+    """Extract canonical song name by removing noisy publication and clickbait tags."""
     title = str(raw_title or "").strip()
     if not title:
         return ""
@@ -270,79 +444,57 @@ def clean_track_title(raw_title: str, artist: str = "") -> str:
 
 
 
-def search_track(query: str) -> Track:
-    """Resolve the best matching YouTube audio result without downloading it."""
+def search_track(query: str, excluded_ids: set[str] | None = None) -> Track:
+    """Prefer Audius and fall back to matching YouTube audio, without saving songs."""
+    import re
+
     query = query.strip()
     if not query:
         raise MusicError("Bạn chưa nói tên bài hát.")
     problem = runtime_problem()
     if problem:
         raise MusicError(problem)
+    clean_query = re.sub(
+        r'^(phát nhạc|bật nhạc|mở nhạc|hát bài|nghe bài|phát bài|bật bài|bài hát|chơi bài|cho tôi nghe bài|cho bé nghe bài|play song|play)\s*',
+        '', query, flags=re.IGNORECASE).strip()
+    filler = {"cho", "toi", "be", "minh", "nghe", "voi", "nhe", "di", "mot", "bai", "nhac", "phat", "bat", "mo"}
+    request_words = _words(clean_query or query)
+    generic_request = not (request_words - filler)
+    if generic_request:
+        clean_query = "happy instrumental"
+    requested = (request_words - filler) or request_words
+    excluded = set(excluded_ids or ())
+    errors = []
+    for finder in (_search_audius_track, _search_youtube_track):
+        try:
+            track = finder(clean_query or query, requested, generic_request, excluded)
+            if track is not None:
+                return track
+        except MusicError as exc:
+            errors.append(str(exc))
+    if errors:
+        raise MusicError("Chưa mở được nhạc. " + " ".join(errors))
+    raise MusicError(
+        f"Audius và YouTube chưa có bài phù hợp với ‘{query}’ để phát. Bé thử tên bài hoặc ca sĩ khác nhé.")
 
-    from yt_dlp import YoutubeDL
-    import re
 
-    clean_query = re.sub(r'^(phát nhạc|bật nhạc|mở nhạc|hát bài|nghe bài|phát bài|bật bài|bài hát|chơi bài|cho tôi nghe bài|cho bé nghe bài|play song|play)\s+', '', query, flags=re.IGNORECASE).strip() or query
-    search_query = f"{clean_query} official audio" if clean_query.isascii() and not any(k in clean_query.casefold() for k in ("music", "song", "audio", "lofi", "chill", "remix", "beat", "soundtrack")) else clean_query
-
-    options = {
-        "quiet": True,
-        "no_warnings": True,
-        "noplaylist": True,
-        "skip_download": True,
-        "format": "bestaudio/best",
-        "socket_timeout": 8,
-        "retries": 1,
-        "extractor_retries": 1,
-    }
+def refresh_track_stream(track: Track) -> Track:
+    """Renew expiring YouTube URLs; Audius uses a stable public endpoint."""
+    if track.provider == "audius":
+        return track
+    if track.provider != "youtube" or not re.fullmatch(r"[\w-]{11}", track.id, flags=re.ASCII):
+        raise MusicError("Nguồn nhạc không hợp lệ. Hãy tìm lại bài hát.")
     try:
-        with YoutubeDL(options) as ydl:
-            result = ydl.extract_info(f"ytsearch5:{search_query}", download=False)
-    except Exception as exc:
-        raise MusicError("Không kết nối được nguồn nhạc lúc này.") from exc
-
-    requested = _words(clean_query) or _words(query)
-    candidates: list[tuple[float, dict]] = []
-    for entry in (result or {}).get("entries") or []:
-        if not entry or not entry.get("url"):
-            continue
-        title = str(entry.get("track") or entry.get("title") or "").strip()
-        artist = _uploader(entry)
-        title_words = _words(title)
-        combined = title_words | _words(artist)
-        overlap = len(requested & combined) / max(1, len(requested))
-        title_overlap = len(requested & title_words) / max(1, len(requested))
-        lowered = title.casefold()
-        penalty = 0.35 if any(word in lowered for word in
-                              ("reaction", "cover", "karaoke", "remix")) else 0
-        candidates.append((overlap + title_overlap * 0.35 - penalty, entry))
-    if not candidates:
-        raise MusicError(f"Không tìm thấy bài phù hợp với ‘{query}’. Bé thử tìm bài khác xem sao nhé!")
-
-    score, entry = max(candidates, key=lambda item: item[0])
-    if score <= 0.1:
-        raise MusicError(f"Không tìm thấy bài phù hợp với ‘{query}’. Bé thử tìm bài khác xem sao nhé!")
-    raw_track = str(entry.get("track") or "").strip()
-    raw_title = str(entry.get("title") or query).strip()
-    clean_art = clean_artist_name(_uploader(entry)) or "YouTube"
-    if raw_track:
-        title = clean_track_title(raw_track, clean_art) or raw_track
-    else:
-        title = clean_track_title(raw_title, clean_art) or raw_title
-    thumbnail_url = str(entry.get("thumbnail") or "").strip()
-    duration = float(entry.get("duration") or 0.0)
-    return Track(
-        str(entry.get("id") or ""),
-        title,
-        clean_art,
-        str(entry.get("url") or ""),
-        str(entry.get("webpage_url") or entry.get("original_url") or ""),
-        {str(k): str(v) for k, v in (entry.get("http_headers") or {}).items()},
-        thumbnail_url=thumbnail_url,
-        duration=duration,
-        display_title=make_font_safe(title),
-        display_artist=make_font_safe(clean_art),
-    )
+        import yt_dlp
+        with yt_dlp.YoutubeDL(_youtube_options()) as extractor:
+            info = extractor.extract_info(
+                f"https://www.youtube.com/watch?v={track.id}", download=False) or {}
+        fresh = _youtube_track(info)
+        if fresh is not None and fresh.id == track.id:
+            return fresh
+    except Exception:
+        pass
+    raise MusicError("Chưa làm mới được luồng âm thanh YouTube. Hãy tìm lại bài hát.")
 
 
 def _ffmpeg_executable(explicit: str | None = None) -> str:

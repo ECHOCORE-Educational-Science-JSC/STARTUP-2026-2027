@@ -58,7 +58,7 @@
 ```sh
 export IDF_CCACHE_ENABLE=1
 idf.py set-target esp32s31
-idf.py menuconfig   # Xiaozhi Assistant -> Board Type -> Espressif ESP32-S31-Korvo-1
+idf.py menuconfig   # Wisio Assistant -> Board Type -> Espressif ESP32-S31-Korvo-1
 idf.py build flash monitor
 ```
 

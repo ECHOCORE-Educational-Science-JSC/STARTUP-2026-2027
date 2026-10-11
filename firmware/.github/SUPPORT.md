@@ -1,13 +1,13 @@
 # Account and Device Support
 
-This GitHub repository tracks the open-source XiaoZhi device firmware. Account recovery, device ownership, and cloud-service requests are handled outside the public issue tracker.
+This GitHub repository tracks the open-source Wisio device firmware. Account recovery, device ownership, and cloud-service requests are handled outside the public issue tracker.
 
 ## Unbind a Previously Owned Device
 
 If you purchased or received a used device that is still bound to another person's account:
 
 1. Collect the device ID and MAC address using the instructions below.
-2. Email [xiaozhi.ai@tenclass.com](mailto:xiaozhi.ai@tenclass.com?subject=Device%20unbinding%20request) with both identifiers.
+2. Email [wisio.ai@tenclass.com](mailto:wisio.ai@tenclass.com?subject=Device%20unbinding%20request) with both identifiers.
 3. Use an email subject such as `Device unbinding / 解绑设备 - Device ID XXX - MAC address XXX`.
 
 For multiple devices, attach a list containing the device ID and MAC address for each device.
@@ -46,4 +46,4 @@ If that line does not appear, search the startup log for `MAC` or `mac_address`.
 
 ## Other Account and Cloud-Service Requests
 
-For verification codes, password recovery, activation, agent configuration, voiceprint, voice cloning, and other cloud services, use the [XiaoZhi AI website](https://xiaozhi.me/).
+For verification codes, password recovery, activation, agent configuration, voiceprint, voice cloning, and other cloud services, use the [Wisio AI website](https://xiaozhi.me/).

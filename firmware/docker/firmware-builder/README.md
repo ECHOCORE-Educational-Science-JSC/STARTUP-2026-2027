@@ -11,7 +11,7 @@ docker build \
   --platform linux/arm64 \
   --build-arg FIRMWARE_SOURCE_REVISION="$(git rev-parse HEAD)" \
   -f docker/firmware-builder/Dockerfile \
-  -t xiaozhi/firmware-builder:idf61-arm64 .
+  -t wisio/firmware-builder:idf61-arm64 .
 ```
 
 The base image defaults to `espressif/idf:release-v6.1`.
@@ -30,7 +30,7 @@ docker run --rm --platform linux/arm64 \
   -e FIRMWARE_LANGUAGE=zh-CN \
   -e FIRMWARE_WAKE_WORD=nihaoxiaozhi \
   -v "$PWD/output:/output" \
-  xiaozhi/firmware-builder:idf61-arm64
+  wisio/firmware-builder:idf61-arm64
 ```
 
 The board fields intentionally follow `main/boards/**/config.json`:
@@ -47,7 +47,7 @@ source and records the derived `board_type` before starting a build.
 
 Each successful job writes:
 
-- `xiaozhi.bin`: application/OTA image;
+- `wisio.bin`: application/OTA image;
 - `merged-binary.bin`: full flash image;
 - `build.log`: complete compiler output;
 - `manifest.json`: inputs, tool versions, source revision, sizes, and SHA-256

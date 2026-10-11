@@ -21,7 +21,7 @@ idf.py menuconfig
 **选择板子：**
 
 ```
-Xiaozhi Assistant -> Board Type -> Spotpear ESP32-S3-1.28-BOX
+Wisio Assistant -> Board Type -> Spotpear ESP32-S3-1.28-BOX
 ```
 
 **编译：**

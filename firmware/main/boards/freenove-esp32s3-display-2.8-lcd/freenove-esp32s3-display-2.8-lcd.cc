@@ -177,10 +177,15 @@ public:
         if (auto* backlight = Board::GetInstance().GetBacklight())
             // Keep the first LCD/WiFi/audio power peak below the USB brownout
             // threshold. The user can raise brightness after startup.
-            backlight->SetBrightness(55);
+            // Wi-Fi and the audio codec start immediately after SetupUI.
+            // Keep their current spike separate from the LCD backlight ramp;
+            // otherwise weak USB supplies can blank/reset the panel near 10%.
+            backlight->SetBrightness(12);
     }
 
     void SetEmotion(const char* emotion) override {
+        if (power_save_.load())
+            return;
         if (!startup_complete_.load()) {
             std::lock_guard<std::mutex> guard(pending_emotion_mutex_);
             pending_emotion_ = emotion != nullptr ? emotion : "neutral";
@@ -206,7 +211,7 @@ public:
             neutral_pending_.store(false);
         }
         // Assets::Apply() runs after SetupUI() and normally replaces the theme's
-        // emoji collection with Xiaozhi's stock faces. Restore the board-owned
+        // emoji collection with Wisio's stock faces. Restore the board-owned
         // Mochi collection on every emotion change so the stock assets cannot
         // overwrite it during startup or a later theme refresh.
         RestoreMochiFaces();
@@ -215,11 +220,31 @@ public:
 
     bool IsStartupComplete() const override { return startup_complete_.load(); }
 
+    void SetPowerSaveMode(bool on) override {
+        DisplayLockGuard lock(this);
+        if (power_save_.exchange(on) == on)
+            return;
+        if (animation_ != nullptr) {
+            if (on)
+                lv_timer_pause(animation_);
+            else
+                lv_timer_resume(animation_);
+        }
+        if (gif_controller_ != nullptr) {
+            if (on)
+                gif_controller_->Pause();
+            else
+                gif_controller_->Resume();
+        }
+        ESP_ERROR_CHECK(esp_lcd_panel_disp_on_off(panel_, !on));
+    }
+
     void SetStatus(const char* status) override {
         DisplayLockGuard lock(this);
         if (status_indicator_ != nullptr) {
             uint32_t color = kWaitingColor;
-            if (std::strcmp(status, Lang::Strings::SPEAKING) == 0) {
+            if (std::strcmp(status, Lang::Strings::SPEAKING) == 0 ||
+                std::strcmp(status, Lang::Strings::CONNECTING) == 0) {
                 color = kSpeakingColor;
             } else if (std::strcmp(status, Lang::Strings::LISTENING) == 0) {
                 color = kListeningColor;
@@ -291,6 +316,7 @@ private:
     int progress_ = 0;
     bool ready_ = false;
     std::atomic<bool> startup_complete_{false};
+    std::atomic<bool> power_save_{false};
     std::atomic<int64_t> emotion_hold_until_us_{0};
     std::atomic<bool> neutral_pending_{false};
     std::mutex pending_emotion_mutex_;
@@ -322,6 +348,8 @@ private:
             return;
         lv_obj_delete(self->transition_mask_);
         self->transition_mask_ = nullptr;
+        if (auto* backlight = Board::GetInstance().GetBacklight())
+            backlight->SetBrightness(45);
     }
 
     static void SwapSplashToFace(lv_anim_t* animation) {
@@ -441,6 +469,9 @@ private:
             return;
         }
         ++tick_;
+        // Keep the complete splash as the only visible startup layer. Network,
+        // asset and audio initialization may invalidate objects underneath it.
+        lv_obj_move_foreground(splash_);
         // Ensure STARTING UP remains readable even when the network and OTA
         // stages complete unusually quickly.
         if (loading_phase_requested_ && !loading_phase_started_ &&
@@ -510,14 +541,37 @@ private:
     bool AppendMacToWifiSsid() const override { return false; }
 
     Button boot_button_;
-    LcdDisplay* display_;
+    LcdDisplay* display_ = nullptr;
     i2c_master_bus_handle_t codec_i2c_bus_;
     TouchDriver touch_;
-    AdcBatteryMonitor* adc_battery_monitor_;
+    AdcBatteryMonitor* adc_battery_monitor_ = nullptr;
+    std::atomic<int> charging_screen_state_{-1};
+
+    void UpdateChargingScreen(bool charging) {
+        if (display_ == nullptr || !display_->IsSetupUICalled()) {
+            return;
+        }
+        // Only a physically connected charge-status signal may suspend the robot.
+        charging = charging && adc_battery_monitor_->HasChargingStatusSignal();
+        const int state = charging ? 1 : 0;
+        if (charging_screen_state_.exchange(state) == state) {
+            return;
+        }
+        // Do not wait for an ADC capacity calculation to suspend audio/display.
+        Application::GetInstance().SetChargingMode(charging);
+    }
 
     void InitializeBatteryMonitor() {
-        adc_battery_monitor_ =
-            new AdcBatteryMonitor(ADC_UNIT_1, ADC_CHANNEL_8, 200000, 200000, GPIO_NUM_NC);
+        adc_battery_monitor_ = new AdcBatteryMonitor(ADC_UNIT_1, ADC_CHANNEL_8, 200000, 200000,
+                                                     BATTERY_CHARGING_GPIO, true);
+        if (!adc_battery_monitor_->HasChargingStatusSignal()) {
+            ESP_LOGW(TAG,
+                     "Automatic charging shutdown disabled: CHRG is not wired to the MCU; "
+                     "GPIO3 and battery voltage cannot determine charging");
+            return;
+        }
+        adc_battery_monitor_->OnChargingStatusChanged(
+            [this](bool charging) { UpdateChargingScreen(charging); });
     }
 
     static void TouchTask(void* arg) {
@@ -529,6 +583,12 @@ private:
         bool down = false;
 
         while (true) {
+            if (app.IsChargingMode()) {
+                down = false;
+                last_tap = 0;
+                vTaskDelay(pdMS_TO_TICKS(100));
+                continue;
+            }
             bool t;
             uint16_t x, y;
             self->touch_.Read(t, x, y);
@@ -613,6 +673,7 @@ private:
     void InitializeButtons() {
         boot_button_.OnClick([this]() {
             auto& app = Application::GetInstance();
+            if (app.IsChargingMode()) return;
             if (app.GetDeviceState() == kDeviceStateStarting) {
                 EnterWifiConfigMode();
                 return;
@@ -671,16 +732,18 @@ public:
         // Overwriting them here ties a release to the developer's LAN address
         // and prevents a device from recovering after the user's IP changes.
         InitializeI2c();
-        InitializeBatteryMonitor();
         InitializeSpi();
         InitializeLcdDisplay();
+        InitializeBatteryMonitor();
         InitializeTouch();
         InitializeButtons();
         InitializeTools();
         // SetupUI turns the backlight on only after its first complete frame.
     }
 
-    int8_t GetWifiMaxTxPower() const override { return 72; }  // 18 dBm
+    // 13 dBm is ample for an indoor bridge and removes the Wi-Fi current
+    // spike that previously browned out weak USB supplies around splash 10%.
+    int8_t GetWifiMaxTxPower() const override { return 52; }  // 13 dBm
 
     virtual Led* GetLed() override {
         static SingleLed led(BUILTIN_LED_GPIO);
@@ -703,9 +766,11 @@ public:
     }
 
     virtual bool GetBatteryLevel(int& level, bool& charging, bool& discharging) override {
-        charging = adc_battery_monitor_->IsCharging();
-        discharging = adc_battery_monitor_->IsDischarging();
+        charging =
+            adc_battery_monitor_->HasChargingStatusSignal() && adc_battery_monitor_->IsCharging();
+        discharging = !charging;
         level = adc_battery_monitor_->GetBatteryLevel();
+        UpdateChargingScreen(charging);
         return true;
     }
 };

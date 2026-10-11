@@ -27,6 +27,9 @@ public:
     virtual void SetPreviewImage(std::unique_ptr<LvglImage> image);
     virtual void SetMusicCover(std::unique_ptr<LvglImage> image);
     virtual void SetMusicAccentColor(uint32_t color) {}
+    virtual void ShowMusicPlayerWithCover(const std::string& title, const std::string& artist,
+                                         uint32_t duration_ms, std::unique_ptr<LvglImage> image,
+                                         uint32_t accent_color);
     virtual void UpdateStatusBar(bool update_all = false);
     virtual void SetPowerSaveMode(bool on);
     virtual bool SnapshotToJpeg(std::string& jpeg_data, int quality = 80);

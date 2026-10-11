@@ -213,7 +213,7 @@ int Es8389AudioCodec::Read(int16_t* dest, int samples) {
 int Es8389AudioCodec::Write(const int16_t* data, int samples) {
     if (output_enabled_) {
         if (output_channels_ > 1) {
-            // xiaozhi 全链路产出单声道 PCM；双声道输出时复制到 L/R 两路，
+            // wisio 全链路产出单声道 PCM；双声道输出时复制到 L/R 两路，
             // 否则样本数不匹配会导致 I2S 欠载/杂音。
             std::vector<int16_t> stereo(static_cast<size_t>(samples) * output_channels_);
             for (int i = 0; i < samples; ++i) {

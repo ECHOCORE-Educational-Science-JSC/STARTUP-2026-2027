@@ -57,7 +57,7 @@ M5Stack Cardputer Adv 是一款基于 ESP32-S3FN8 (Stamp-S3A) 的卡片式电脑
 | 0x0 | bootloader/bootloader.bin |
 | 0x8000 | partition_table/partition-table.bin |
 | 0xd000 | ota_data_initial.bin |
-| 0x20000 | xiaozhi.bin |
+| 0x20000 | wisio.bin |
 | 0x600000 | generated_assets.bin |
 
 烧录命令 (build 目录为 `build-cardputer-adv`):
@@ -69,7 +69,7 @@ python -m esptool --chip esp32s3 -b 460800 -p PORT \
   0x0 build-cardputer-adv/bootloader/bootloader.bin \
   0x8000 build-cardputer-adv/partition_table/partition-table.bin \
   0xd000 build-cardputer-adv/ota_data_initial.bin \
-  0x20000 build-cardputer-adv/xiaozhi.bin \
+  0x20000 build-cardputer-adv/wisio.bin \
   0x600000 build-cardputer-adv/generated_assets.bin
 ```
 

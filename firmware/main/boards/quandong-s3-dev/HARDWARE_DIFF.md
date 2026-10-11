@@ -1,6 +1,6 @@
 # quandong-s3-dev vs bread-compact-wifi 硬件差异
 
-两块板都基于 **ESP32-S3 + WiFi**，软件层都继承 `WifiBoard`，启动 → 配网 → 接小智后端 → 语音对话 的主流程完全一致。差异集中在 **音频路径**、**显示**、**人机交互** 三块。
+两块板都基于 **ESP32-S3 + WiFi**，软件层都继承 `WifiBoard`，启动 → 配网 → 接Wisio后端 → 语音对话 的主流程完全一致。差异集中在 **音频路径**、**显示**、**人机交互** 三块。
 
 ---
 
@@ -108,7 +108,7 @@
 
 ### MCP 工具
 
-bread-compact-wifi 注册了一个 `LampController(GPIO18)` 作为 MCP 协议演示，可以远程通过小智指令"开灯/关灯"。quandong 没有这种外设示例。
+bread-compact-wifi 注册了一个 `LampController(GPIO18)` 作为 MCP 协议演示，可以远程通过Wisio指令"开灯/关灯"。quandong 没有这种外设示例。
 
 ---
 

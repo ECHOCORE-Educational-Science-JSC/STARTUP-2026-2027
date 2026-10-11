@@ -127,16 +127,16 @@ def rename_artifact(original_name: str, version: str) -> str:
     Rename artifact according to the specified rules.
     
     Rules:
-    - Remove "xiaozhi_" prefix
+    - Remove "wisio_" prefix
     - Remove hash suffix (underscore followed by hex string)
     - Add version prefix (e.g., "v2.0.4_")
     - Add .zip extension
     
     Examples:
-        xiaozhi_atk-dnesp32s3-box0_43ef2f4e7f0957dc62ec7d628ac2819d226127b8
+        wisio_atk-dnesp32s3-box0_43ef2f4e7f0957dc62ec7d628ac2819d226127b8
         -> v2.0.4_atk-dnesp32s3-box0.zip
         
-        xiaozhi_waveshare-esp32-p4-nano-10.1-a_43ef2f4e7f0957dc62ec7d628ac2819d226127b8
+        wisio_waveshare-esp32-p4-nano-10.1-a_43ef2f4e7f0957dc62ec7d628ac2819d226127b8
         -> v2.0.4_waveshare-esp32-p4-nano-10.1-a.zip
     
     Args:
@@ -146,10 +146,10 @@ def rename_artifact(original_name: str, version: str) -> str:
     Returns:
         New filename
     """
-    # Remove "xiaozhi_" prefix
+    # Remove "wisio_" prefix
     name = original_name
-    if name.startswith("xiaozhi_"):
-        name = name[len("xiaozhi_"):]
+    if name.startswith("wisio_"):
+        name = name[len("wisio_"):]
     
     # Remove known extensions only (not using splitext to avoid issues with
     # names containing dots like "esp32-s3-touch-amoled-2.06")

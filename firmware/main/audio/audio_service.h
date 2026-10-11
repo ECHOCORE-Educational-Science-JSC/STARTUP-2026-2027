@@ -127,6 +127,7 @@ public:
     bool IsAfeWakeWord();
 
     void EnableWakeWordDetection(bool enable);
+    void SetSuspended(bool suspended);
     void ReleaseWakeWordResources();
     void EnableVoiceProcessing(bool enable);
     void EnableAudioTesting(bool enable);
@@ -193,6 +194,7 @@ private:
     bool device_aec_enabled_ = false;
 #endif
     std::atomic<bool> service_stopped_{true};
+    std::atomic<bool> suspended_{false};
     std::atomic<bool> audio_input_need_warmup_{false};
 
     esp_timer_handle_t audio_power_timer_ = nullptr;

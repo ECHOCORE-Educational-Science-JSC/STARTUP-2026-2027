@@ -22,7 +22,7 @@
 static const char* TAG = "EthernetBoard";
 
 static esp_eth_phy_t* CreatePhy(const eth_phy_config_t& phy_config) {
-#if CONFIG_XIAOZHI_ETH_PHY_IP101
+#if CONFIG_WISIO_ETH_PHY_IP101
     return esp_eth_phy_new_ip101(&phy_config);
 #else
     return nullptr;
@@ -31,8 +31,8 @@ static esp_eth_phy_t* CreatePhy(const eth_phy_config_t& phy_config) {
 
 static eth_esp32_emac_config_t CreateEmacConfig() {
     eth_esp32_emac_config_t config = {};
-    config.smi_gpio.mdc_num = CONFIG_XIAOZHI_ETH_MDC_GPIO;
-    config.smi_gpio.mdio_num = CONFIG_XIAOZHI_ETH_MDIO_GPIO;
+    config.smi_gpio.mdc_num = CONFIG_WISIO_ETH_MDC_GPIO;
+    config.smi_gpio.mdio_num = CONFIG_WISIO_ETH_MDIO_GPIO;
     config.interface = EMAC_DATA_INTERFACE_RMII;
     config.clock_config.rmii.clock_mode = EMAC_CLK_EXT_IN;
     config.clock_config.rmii.clock_gpio = static_cast<emac_rmii_clock_gpio_t>(50);
@@ -99,8 +99,8 @@ void EthernetBoard::NetworkTask() {
 
     eth_mac_config_t mac_config = ETH_MAC_DEFAULT_CONFIG();
     eth_phy_config_t phy_config = ETH_PHY_DEFAULT_CONFIG();
-    phy_config.phy_addr = CONFIG_XIAOZHI_ETH_PHY_ADDR;
-    phy_config.reset_gpio_num = CONFIG_XIAOZHI_ETH_PHY_RST_GPIO;
+    phy_config.phy_addr = CONFIG_WISIO_ETH_PHY_ADDR;
+    phy_config.reset_gpio_num = CONFIG_WISIO_ETH_PHY_RST_GPIO;
 
     eth_esp32_emac_config_t emac_config = CreateEmacConfig();
     esp_eth_mac_t* mac = esp_eth_mac_new_esp32(&emac_config, &mac_config);

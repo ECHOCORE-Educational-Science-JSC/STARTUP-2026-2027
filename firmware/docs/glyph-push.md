@@ -41,7 +41,7 @@ The `text_font` object describes the exact font data installed on the device:
 | `size` | number | Text font pixel profile used by the firmware. |
 | `bpp` | number | Bits per pixel of the text font bitmap, currently `1` or `4`. |
 
-`basic` is the font linked into the firmware. The standard XiaoZhi assets report `common` after
+`basic` is the font linked into the firmware. The standard Wisio assets report `common` after
 loading their common font from the assets partition. The server must use the values from each
 device's hello message rather than inferring them from the board model.
 

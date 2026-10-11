@@ -188,6 +188,8 @@ void AudioService::Stop() {
 }
 
 bool AudioService::ReadAudioData(std::vector<int16_t>& data, int sample_rate, int samples) {
+    if (suspended_.load())
+        return false;
     if (!codec_->input_enabled()) {
         esp_timer_stop(audio_power_timer_);
         esp_timer_start_periodic(audio_power_timer_, AUDIO_POWER_CHECK_INTERVAL_MS * 1000);
@@ -327,17 +329,18 @@ void AudioService::AudioOutputTask() {
         audio_queue_cv_.notify_all();
         lock.unlock();
 
-        if (!codec_->output_enabled()) {
+        if (!suspended_.load() && !codec_->output_enabled()) {
             esp_timer_stop(audio_power_timer_);
             esp_timer_start_periodic(audio_power_timer_, AUDIO_POWER_CHECK_INTERVAL_MS * 1000);
             codec_->EnableOutput(true);
         }
 
-        if (task->playback_id != 0 && callbacks_.on_playback_progress) {
+        if (!suspended_.load() && task->playback_id != 0 && callbacks_.on_playback_progress) {
             callbacks_.on_playback_progress(task->playback_id, task->media_position_ms);
         }
 
-        codec_->OutputData(task->pcm);
+        if (!suspended_.load())
+            codec_->OutputData(task->pcm);
 
         /* Update the last output time */
         last_output_time_ = std::chrono::steady_clock::now();
@@ -431,7 +434,7 @@ void AudioService::OpusCodecTask() {
             }
 
             lock.lock();
-            if (decoded && generation == playback_generation_ && !service_stopped_.load()) {
+            if (decoded && generation == playback_generation_ && !service_stopped_.load() && !suspended_.load()) {
                 audio_playback_queue_.push_back(std::move(task));
             }
             decode_in_flight_ = false;
@@ -584,6 +587,8 @@ void AudioService::PushTaskToEncodeQueue(AudioTaskType type, std::vector<int16_t
 }
 
 bool AudioService::PushPacketToDecodeQueue(std::unique_ptr<AudioStreamPacket> packet, bool wait) {
+    if (suspended_.load())
+        return false;
     std::unique_lock<std::mutex> lock(audio_queue_mutex_);
     const uint32_t generation = playback_generation_;
     if (audio_decode_queue_.size() >= MAX_DECODE_PACKETS_IN_QUEUE) {
@@ -597,7 +602,7 @@ bool AudioService::PushPacketToDecodeQueue(std::unique_ptr<AudioStreamPacket> pa
             return false;
         }
     }
-    if (service_stopped_.load() || generation != playback_generation_) {
+    if (service_stopped_.load() || suspended_.load() || generation != playback_generation_) {
         return false;
     }
     playback_drained_notified_ = false;
@@ -636,7 +641,20 @@ std::unique_ptr<AudioStreamPacket> AudioService::PopWakeWordPacket() {
     return nullptr;
 }
 
+void AudioService::SetSuspended(bool suspended) {
+    suspended_.store(suspended);
+    if (suspended) {
+        EnableVoiceProcessing(false);
+        EnableWakeWordDetection(false);
+        xEventGroupClearBits(event_group_, AS_EVENT_AUDIO_TESTING_RUNNING);
+        // Stop capture in its owning task, including boards with ADC input.
+        xEventGroupSetBits(event_group_, AS_EVENT_AUDIO_INPUT_STOP_REQUEST);
+    }
+}
+
 void AudioService::EnableWakeWordDetection(bool enable) {
+    if (enable && suspended_.load())
+        return;
     ESP_LOGD(TAG, "%s wake word detection", enable ? "Enabling" : "Disabling");
     if (enable) {
         if (!InitializeAudioEngine()) {
@@ -685,6 +703,8 @@ void AudioService::ReleaseWakeWordResources() {
 }
 
 void AudioService::EnableVoiceProcessing(bool enable) {
+    if (enable && suspended_.load())
+        return;
     ESP_LOGD(TAG, "%s voice processing", enable ? "Enabling" : "Disabling");
 
     if (enable) {
@@ -710,6 +730,8 @@ void AudioService::EnableVoiceProcessing(bool enable) {
 }
 
 void AudioService::EnableAudioTesting(bool enable) {
+    if (enable && suspended_.load())
+        return;
     ESP_LOGI(TAG, "%s audio testing", enable ? "Enabling" : "Disabling");
     if (enable) {
         xEventGroupSetBits(event_group_, AS_EVENT_AUDIO_TESTING_RUNNING);
@@ -741,6 +763,8 @@ void AudioService::SetCallbacks(AudioServiceCallbacks& callbacks) {
 }
 
 void AudioService::PlaySound(const std::string_view& ogg) {
+    if (suspended_.load())
+        return;
     if (!codec_->output_enabled()) {
         esp_timer_stop(audio_power_timer_);
         esp_timer_start_periodic(audio_power_timer_, AUDIO_POWER_CHECK_INTERVAL_MS * 1000);

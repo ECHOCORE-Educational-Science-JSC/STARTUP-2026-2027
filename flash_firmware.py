@@ -17,7 +17,7 @@ BOOTLOADER_BIN = os.path.join(BIN_DIR, "bootloader.bin")
 PARTITION_BIN = os.path.join(BIN_DIR, "partition-table.bin")
 OTADATA_BIN = os.path.join(BIN_DIR, "ota_data_initial.bin")
 ASSETS_BIN = os.path.join(BIN_DIR, "generated_assets.bin")
-APP_BIN = os.path.join(BIN_DIR, "xiaozhi.bin")
+APP_BIN = os.path.join(BIN_DIR, "wisio.bin")
 
 
 def print_banner():
@@ -147,7 +147,7 @@ def run_flash(esptool_cmd, port, mode):
     base_args = esptool_cmd + [
         "--chip", "esp32s3",
         "-p", port,
-        "-b", "460800",
+        "-b", "115200",
         "--before", "default_reset",
         "--after", "hard_reset"
     ]

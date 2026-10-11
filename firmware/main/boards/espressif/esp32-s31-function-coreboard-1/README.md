@@ -16,7 +16,7 @@ variant settings.
 - BOOT button on GPIO61
 - Wi-Fi networking
 
-The board has no display, so XiaoZhi uses `NoDisplay`. A display can be added
+The board has no display, so Wisio uses `NoDisplay`. A display can be added
 later through the J2 GPIO header by extending this board implementation. Do not
 reuse GPIO50 through GPIO57, GPIO60, or GPIO61 because they are assigned to the
 on-board audio, LED, and BOOT button.

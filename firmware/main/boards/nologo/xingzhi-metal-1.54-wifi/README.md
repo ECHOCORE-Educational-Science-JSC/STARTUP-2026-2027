@@ -27,7 +27,7 @@ git clone https://github.com/78/xiaozhi-esp32.git
 **进入工程**
 
 ```bash
-cd xiaozhi-esp32
+cd wisio-esp32
 ```
 
 **配置编译目标为 ESP32S3**
@@ -45,7 +45,7 @@ idf.py menuconfig
 **选择板子**
 
 ```bash
-- `Xiaozhi Assistant` → `Board Type` → 选择 `无名科技星智1.54 METAL(wifi)`
+- `Wisio Assistant` → `Board Type` → 选择 `无名科技星智1.54 METAL(wifi)`
 ```
 
 **编译**

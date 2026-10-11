@@ -107,7 +107,7 @@ python scripts/build.py lcdwiki-es3c35p --zip
 # 或手动编译
 idf.py set-target esp32s3
 idf.py menuconfig
-# Xiaozhi Assistant -> Board Type -> LCD Wiki ES3C35P (3.5寸 ESP32-S3)
+# Wisio Assistant -> Board Type -> LCD Wiki ES3C35P (3.5寸 ESP32-S3)
 idf.py build flash monitor
 ```
 

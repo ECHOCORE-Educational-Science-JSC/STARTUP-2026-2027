@@ -23,15 +23,15 @@ Official github: [T-Display-P4](https://github.com/Xinyuan-LilyGO/T-Display-P4)
 
 * Select the board
 
-        Xiaozhi Assistant -> Board Type -> LILYGO T-Display-P4
+        Wisio Assistant -> Board Type -> LILYGO T-Display-P4
 
 * Select the screen type
 
-        Xiaozhi Assistant -> Select the screen type -> (Select the screen type you need to configure)
+        Wisio Assistant -> Select the screen type -> (Select the screen type you need to configure)
 
 * Screen the screen pixel format
 
-        Xiaozhi Assistant -> Select the color format of the screen -> (Select the screen pixel format you need to configure)
+        Wisio Assistant -> Select the color format of the screen -> (Select the screen pixel format you need to configure)
 
 * Build
 
@@ -39,4 +39,4 @@ Official github: [T-Display-P4](https://github.com/Xinyuan-LilyGO/T-Display-P4)
 
 ### ESP32C6 Configuration
 
-* Flash the slave example from the esp-hosted-mcu library for the target chip ESP32C6. The esp-hosted-mcu version must match the one used in the xiaozhi-esp32 library.
+* Flash the slave example from the esp-hosted-mcu library for the target chip ESP32C6. The esp-hosted-mcu version must match the one used in the wisio-esp32 library.

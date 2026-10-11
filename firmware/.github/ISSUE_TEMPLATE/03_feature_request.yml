@@ -6,7 +6,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        Use the **Board support request** form for a new board, hardware revision, or product variant. Account and cloud-product requests belong on the [XiaoZhi AI website](https://xiaozhi.me/).
+        Use the **Board support request** form for a new board, hardware revision, or product variant. Account and cloud-product requests belong on the [Wisio AI website](https://xiaozhi.me/).
 
   - type: checkboxes
     id: checklist

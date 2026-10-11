@@ -95,16 +95,16 @@ subprocess.run([str(toolchain / "xtensa-esp32s3-elf-ar.exe"), "qc", str(archive)
 subprocess.run([str(toolchain / "xtensa-esp32s3-elf-ranlib.exe"), str(archive)],
                cwd=build, check=True)
 
-link_index = next(i for i, line in enumerate(lines) if line.startswith("build xiaozhi.elf:"))
-project_object = "CMakeFiles/xiaozhi.elf.dir/project_elf_src_esp32s3.c.obj"
+link_index = next(i for i, line in enumerate(lines) if line.startswith("build wisio.elf:"))
+project_object = "CMakeFiles/wisio.elf.dir/project_elf_src_esp32s3.c.obj"
 assert (build / project_object).exists()
 link_libraries = lines[link_index + 3].removeprefix("  LINK_LIBRARIES = ")
 link_paths = lines[link_index + 4].removeprefix("  LINK_PATH = ")
-link_response = build / "CMakeFiles" / "xiaozhi.elf.rsp"
+link_response = build / "CMakeFiles" / "wisio.elf.rsp"
 link_response.write_text(f"{project_object} {link_paths} {link_libraries}")
 link_commands = subprocess.check_output(
     ["C:/Espressif/tools/ninja/1.12.1/ninja.exe", "-C", str(build),
-     "-t", "commands", "xiaozhi.elf"], text=True).splitlines()
+     "-t", "commands", "wisio.elf"], text=True).splitlines()
 subprocess.run(link_commands[-1], cwd=build, shell=True, check=True)
 
 idf = Path("C:/Espressif/frameworks/esp-idf-v5.5.3")
@@ -114,5 +114,5 @@ subprocess.run([
     "--chip", "esp32s3", "elf2image", "--flash_mode", "dio",
     "--flash_freq", "80m", "--flash_size", "16MB", "--elf-sha256-offset", "0xb0",
     "--min-rev-full", "0", "--max-rev-full", "99", "-o",
-    str(build / "xiaozhi.bin"), str(build / "xiaozhi.elf"),
+    str(build / "wisio.bin"), str(build / "wisio.elf"),
 ], cwd=build, check=True)

@@ -37,6 +37,7 @@ public:
     const std::string& GetLastDetectedWakeWord() const { return last_detected_wake_word_; }
 
 private:
+    bool commands_allocated_ = false;
     struct Command {
         std::string command;
         std::string text;

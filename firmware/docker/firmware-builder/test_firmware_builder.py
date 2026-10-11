@@ -44,7 +44,7 @@ print("fake compiler output")
 if %d == 0:
     build = pathlib.Path("build")
     build.mkdir(exist_ok=True)
-    (build / "xiaozhi.bin").write_bytes(b"ota")
+    (build / "wisio.bin").write_bytes(b"ota")
     (build / "merged-binary.bin").write_bytes(b"full")
 sys.exit(%d)
 """
@@ -79,7 +79,7 @@ sys.exit(%d)
                 )
 
             self.assertEqual(exit_code, 0)
-            self.assertEqual((output / "xiaozhi.bin").read_bytes(), b"ota")
+            self.assertEqual((output / "wisio.bin").read_bytes(), b"ota")
             self.assertEqual((output / "merged-binary.bin").read_bytes(), b"full")
             self.assertIn("fake compiler output", (output / "build.log").read_text())
             manifest = json.loads((output / "manifest.json").read_text())
@@ -143,7 +143,7 @@ sys.exit(%d)
                 "FAILED: component.o\n"
                 "config.h:48:2: error: OLED display type is not selected\n"
                 "ninja: build stopped: subcommand failed.\n"
-                "XIAOZHI_STAGE uploading\n",
+                "WISIO_STAGE uploading\n",
                 encoding="utf-8",
             )
 

@@ -78,6 +78,7 @@ void WebsocketProtocol::CloseAudioChannel(bool send_goodbye) {
 }
 
 bool WebsocketProtocol::OpenAudioChannel() {
+    ResetServerGreeting();
     Settings settings("websocket", false);
     std::string url = settings.GetString("url");
     std::string token = settings.GetString("token");
@@ -234,10 +235,12 @@ std::string WebsocketProtocol::GetHelloMessage() {
 
 void WebsocketProtocol::ParseServerHello(const cJSON* root) {
     auto transport = cJSON_GetObjectItem(root, "transport");
-    if (transport == nullptr || strcmp(transport->valuestring, "websocket") != 0) {
+    if (!cJSON_IsString(transport) || strcmp(transport->valuestring, "websocket") != 0) {
         ESP_LOGE(TAG, "Unsupported transport: %s", transport->valuestring);
         return;
     }
+
+    ParseServerGreeting(root);
 
     auto session_id = cJSON_GetObjectItem(root, "session_id");
     if (cJSON_IsString(session_id)) {

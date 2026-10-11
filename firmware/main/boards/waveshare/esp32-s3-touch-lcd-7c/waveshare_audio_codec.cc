@@ -268,7 +268,7 @@ int WaveshareAudioCodec::Write(const int16_t* data, int frames)
         return frames;
     }
 
-    // xiaozhi 上层通常是 mono，这里统一扩展成 stereo
+    // wisio 上层通常是 mono，这里统一扩展成 stereo
     stereo_buffer_.resize(frames * 2);
 
     for (int i = 0; i < frames; i++) {

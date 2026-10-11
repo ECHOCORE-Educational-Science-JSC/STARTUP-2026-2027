@@ -67,6 +67,7 @@ This document describes the WebSocket communication protocol between the device 
    }
    ```
    - If `transport` matches, the device marks the audio channel as opened.
+   - Optional `greeting_pending: true` in the server hello reserves a spoken introduction for this connection. The device stays in Connecting with microphone and wake detection disabled; the first `tts:start` transitions directly to Speaking. Missing, false or non-boolean values preserve normal listening. The flag is reset on each channel open and consumed once. The server must send `listen:start` if no introduction arrives, or close a stalled session. The local bridge greets once on every new connection, including reconnects.
    - If no valid hello arrives within the timeout (default 10 seconds), the connection is considered failed and the network error callback is fired.
 
 5. **Subsequent exchanges**
@@ -199,7 +200,7 @@ WebSocket text frames carry JSON. The most common `"type"` values and their sema
        "session_id": "xxx",
        "type": "listen",
        "state": "detect",
-       "text": "Hi XiaoZhi"
+       "text": "Hi Wisio"
      }
      ```
 

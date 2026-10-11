@@ -6,7 +6,7 @@ import ctypes
 import bridge
 import imageio_ffmpeg
 import websockets
-import yt_dlp  # noqa: F401
+import shutil
 
 
 def main() -> int:
@@ -21,6 +21,16 @@ def main() -> int:
     print("Bridge check: OK")
     print(f"Opus: {opus}")
     print(f"FFmpeg: {ffmpeg}")
+    try:
+        import yt_dlp.version
+        import yt_dlp_ejs
+        js = shutil.which("deno") or shutil.which("node")
+        if js:
+            print(f"YouTube: yt-dlp {yt_dlp.version.__version__}; JS runtime: {js}")
+        else:
+            print("YouTube needs Node.js 22+ or Deno 2.3+; Audius remains available")
+    except ImportError:
+        print("YouTube dependency missing: run setup_bridge.cmd; Audius remains available")
     return 0
 
 

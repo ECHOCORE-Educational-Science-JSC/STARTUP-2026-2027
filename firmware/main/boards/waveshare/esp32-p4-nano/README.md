@@ -17,7 +17,7 @@
 
 ### Common Raspberry adapter screen
 
-**These displays are supported on [ESP32-P4-NANO BSP](https://github.com/waveshareteam/waveshare-ESP32-components/tree/master/bsp/esp32_p4_nano), but not on xiaozhi-esp32**
+**These displays are supported on [ESP32-P4-NANO BSP](https://github.com/waveshareteam/waveshare-ESP32-components/tree/master/bsp/esp32_p4_nano), but not on wisio-esp32**
 
 <details open>
 <summary>View full display</summary>

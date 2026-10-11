@@ -43,7 +43,7 @@ idf.py menuconfig
 **选择板子：**
 
 ```
-Xiaozhi Assistant -> Board Type -> 元控·青春
+Wisio Assistant -> Board Type -> 元控·青春
 ```
 
 **修改 psram 配置：**
@@ -68,5 +68,5 @@ idf.py build
 **合并BIN：**
 
 ```bash
-idf.py merge-bin -o xiaozhi-nova.bin -f raw
+idf.py merge-bin -o wisio-nova.bin -f raw
 ```

@@ -6,7 +6,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        This form is for the open-source firmware. For device unbinding, email [xiaozhi.ai@tenclass.com](mailto:xiaozhi.ai@tenclass.com?subject=Device%20unbinding%20request) privately with the device ID and MAC address. Use the [XiaoZhi AI website](https://xiaozhi.me/) for other account and cloud-service requests.
+        This form is for the open-source firmware. For device unbinding, email [wisio.ai@tenclass.com](mailto:wisio.ai@tenclass.com?subject=Device%20unbinding%20request) privately with the device ID and MAC address. Use the [Wisio AI website](https://xiaozhi.me/) for other account and cloud-service requests.
 
   - type: checkboxes
     id: checklist
@@ -28,7 +28,7 @@ body:
   - type: input
     id: source_version
     attributes:
-      label: XiaoZhi source version
+      label: Wisio source version
       description: Paste the complete output of `git describe --tags --always --dirty`. Do not enter "latest".
       placeholder: ex. v2.2.6-15-g1a2b3c4
     validations:

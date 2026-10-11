@@ -35,7 +35,7 @@ idf.py menuconfig
 ***选择板子：***
 
 ```
-Xiaozhi Assistant -> Board Type -> labplus Ledong_v2 board
+Wisio Assistant -> Board Type -> labplus Ledong_v2 board
 ```
 
 ***修改 psram 配置：***
@@ -53,7 +53,7 @@ idf.py build
 **固件打包：**
 
 ```bash
-esptool.py -p /dev/ttyACM0 -b 1500000 --before default_reset --after hard_reset --chip esp32s3 write_flash --flash_mode dio --flash_freq 80m --flash_size 16MB 0x0 bootloader/bootloader.bin 0x100000 xiaozhi.bin 0x8000 partition_table/partition-table.bin 0xd000 ota_data_initial.bin 0x10000 srmodels/srmodels.bin 
+esptool.py -p /dev/ttyACM0 -b 1500000 --before default_reset --after hard_reset --chip esp32s3 write_flash --flash_mode dio --flash_freq 80m --flash_size 16MB 0x0 bootloader/bootloader.bin 0x100000 wisio.bin 0x8000 partition_table/partition-table.bin 0xd000 ota_data_initial.bin 0x10000 srmodels/srmodels.bin
 ```
 
 ## 使用

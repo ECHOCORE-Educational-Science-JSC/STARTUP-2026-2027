@@ -1,8 +1,8 @@
-menu "Xiaozhi Assistant"
+menu "Wisio Assistant"
 
 config OTA_URL
     string "Default OTA URL"
-    default "https://api.tenclass.net/xiaozhi/ota/"
+    default "http://192.0.2.1/wisio/ota/"
     help
         The application will access this URL to check for new firmwares and server address.
 
@@ -598,7 +598,7 @@ choice BOARD_TYPE
         bool "XOrigin AiPi-Lite"
         depends on IDF_TARGET_ESP32S3
     config BOARD_TYPE_YUNLIAO_S3
-        bool "Yunliao S3 (小智云聊)"
+        bool "Yunliao S3 (Wisio云聊)"
         depends on IDF_TARGET_ESP32S3
     config BOARD_TYPE_ZECTRIX_S3_EPAPER_4_2
         bool "Zectrix S3 ePaper 4.2"
@@ -617,17 +617,17 @@ choice BOARD_TYPE
         depends on IDF_TARGET_ESP32S3
 endchoice
 
-choice XIAOZHI_NETWORK_TYPE
+choice WISIO_NETWORK_TYPE
     prompt "Network Type"
     depends on BOARD_TYPE_WAVESHARE_ESP32_P4_NANO
-    default XIAOZHI_NETWORK_WIFI
+    default WISIO_NETWORK_WIFI
     help
         Select the network connection used by this board.
 
-    config XIAOZHI_NETWORK_WIFI
+    config WISIO_NETWORK_WIFI
         bool "WiFi"
 
-    config XIAOZHI_NETWORK_ETHERNET
+    config WISIO_NETWORK_ETHERNET
         bool "Ethernet"
         select ETH_ENABLED
         select ETH_USE_ESP32_EMAC
@@ -636,19 +636,19 @@ choice XIAOZHI_NETWORK_TYPE
 endchoice
 
 menu "Ethernet Configuration"
-    depends on XIAOZHI_NETWORK_ETHERNET
+    depends on WISIO_NETWORK_ETHERNET
 
-    choice XIAOZHI_ETH_PHY_MODEL
+    choice WISIO_ETH_PHY_MODEL
         prompt "Ethernet PHY Device"
-        default XIAOZHI_ETH_PHY_IP101
+        default WISIO_ETH_PHY_IP101
 
-        config XIAOZHI_ETH_PHY_IP101
+        config WISIO_ETH_PHY_IP101
             bool "IP101/IP101GR"
             help
                 IP101/IP101GR 10/100M Ethernet PHY, used by Waveshare ESP32-P4-NANO.
     endchoice
 
-    config XIAOZHI_ETH_MDC_GPIO
+    config WISIO_ETH_MDC_GPIO
         int "Ethernet SMI MDC GPIO"
         range 0 54
         default 31 if BOARD_TYPE_WAVESHARE_ESP32_P4_NANO
@@ -656,7 +656,7 @@ menu "Ethernet Configuration"
         help
             GPIO used by the Ethernet SMI MDC signal.
 
-    config XIAOZHI_ETH_MDIO_GPIO
+    config WISIO_ETH_MDIO_GPIO
         int "Ethernet SMI MDIO GPIO"
         range 0 54
         default 52 if BOARD_TYPE_WAVESHARE_ESP32_P4_NANO
@@ -664,7 +664,7 @@ menu "Ethernet Configuration"
         help
             GPIO used by the Ethernet SMI MDIO signal.
 
-    config XIAOZHI_ETH_PHY_ADDR
+    config WISIO_ETH_PHY_ADDR
         int "Ethernet PHY Address"
         range -1 31
         default 1
@@ -672,7 +672,7 @@ menu "Ethernet Configuration"
             Set the PHY address according to the board schematic.
             Use -1 to let the driver search for the PHY address.
 
-    config XIAOZHI_ETH_PHY_RST_GPIO
+    config WISIO_ETH_PHY_RST_GPIO
         int "Ethernet PHY Reset GPIO"
         range -1 54
         default 51 if BOARD_TYPE_WAVESHARE_ESP32_P4_NANO
@@ -838,7 +838,7 @@ choice DISPLAY_STYLE
     prompt "Select display style"
     default USE_DEFAULT_MESSAGE_STYLE
     help
-        Select display style for Xiaozhi device
+        Select display style for Wisio device
 
     config USE_DEFAULT_MESSAGE_STYLE
         bool "Enable default message style"
@@ -1007,7 +1007,7 @@ menu "Camera Configuration"
 
     comment "Warning: Please read the help text before modifying these settings."
 
-    config XIAOZHI_CAMERA_MIRROR_CONFIGURED
+    config WISIO_CAMERA_MIRROR_CONFIGURED
         bool "Override camera mirror settings"
         default n
         help
@@ -1016,21 +1016,21 @@ menu "Camera Configuration"
             been initialized. Parameterized builds enable this automatically
             when either mirror setting is configured.
 
-    config XIAOZHI_CAMERA_HMIRROR
+    config WISIO_CAMERA_HMIRROR
         bool "Mirror Camera Horizontally"
         default n
-        depends on XIAOZHI_CAMERA_MIRROR_CONFIGURED
+        depends on WISIO_CAMERA_MIRROR_CONFIGURED
         help
             Flip the captured camera image across the vertical axis.
 
-    config XIAOZHI_CAMERA_VFLIP
+    config WISIO_CAMERA_VFLIP
         bool "Mirror Camera Vertically"
         default n
-        depends on XIAOZHI_CAMERA_MIRROR_CONFIGURED
+        depends on WISIO_CAMERA_MIRROR_CONFIGURED
         help
             Flip the captured camera image across the horizontal axis.
 
-    config XIAOZHI_CAMERA_ALLOW_JPEG_INPUT
+    config WISIO_CAMERA_ALLOW_JPEG_INPUT
         bool "Allow JPEG Input"
         default n
         help
@@ -1038,9 +1038,9 @@ menu "Camera Configuration"
 
             This option may need to be enabled when using a USB camera.
 
-            Not currently supported when used simultaneously with XIAOZHI_ENABLE_ROTATE_CAMERA_IMAGE.
+            Not currently supported when used simultaneously with WISIO_ENABLE_ROTATE_CAMERA_IMAGE.
 
-    config XIAOZHI_ENABLE_HARDWARE_JPEG_ENCODER
+    config WISIO_ENABLE_HARDWARE_JPEG_ENCODER
         bool "Enable Hardware JPEG Encoder"
         default y
         depends on SOC_JPEG_ENCODE_SUPPORTED
@@ -1048,22 +1048,22 @@ menu "Camera Configuration"
             Use hardware JPEG encoder on ESP32-P4 to encode image to JPEG.
             See https://docs.espressif.com/projects/esp-idf/en/stable/esp32p4/api-reference/peripherals/jpeg.html for more details.
 
-    config XIAOZHI_ENABLE_HARDWARE_JPEG_DECODER
+    config WISIO_ENABLE_HARDWARE_JPEG_DECODER
         bool "Enable Hardware JPEG Decoder"
         default n
-        depends on SOC_JPEG_DECODE_SUPPORTED && XIAOZHI_CAMERA_ALLOW_JPEG_INPUT
+        depends on SOC_JPEG_DECODE_SUPPORTED && WISIO_CAMERA_ALLOW_JPEG_INPUT
         help
             Use hardware JPEG decoder on ESP32-P4 to decode JPEG to image.
             See https://docs.espressif.com/projects/esp-idf/en/stable/esp32p4/api-reference/peripherals/jpeg.html for more details.
 
-    config XIAOZHI_ENABLE_CAMERA_DEBUG_MODE
+    config WISIO_ENABLE_CAMERA_DEBUG_MODE
         bool "Enable Camera Debug Mode"
         default n
         help
             Enable camera debug mode, print camera debug information to the console.
             Only works on boards that support camera.
 
-    config XIAOZHI_ENABLE_CAMERA_ENDIANNESS_SWAP
+    config WISIO_ENABLE_CAMERA_ENDIANNESS_SWAP
         bool "Enable software camera buffer endianness swapping"
         default n
         depends on !CAMERA_SENSOR_SWAP_PIXEL_BYTE_ORDER
@@ -1076,27 +1076,27 @@ menu "Camera Configuration"
 
             ATTENTION: If the option CAMERA_SENSOR_SWAP_PIXEL_BYTE_ORDER is available for your sensor, please use that instead.
 
-    menuconfig XIAOZHI_ENABLE_ROTATE_CAMERA_IMAGE
+    menuconfig WISIO_ENABLE_ROTATE_CAMERA_IMAGE
         bool "Enable Camera Image Rotation"
         default n
-        depends on !XIAOZHI_CAMERA_ALLOW_JPEG_INPUT
+        depends on !WISIO_CAMERA_ALLOW_JPEG_INPUT
         help
             Enable camera image rotation, rotate the camera image to the correct orientation.
             - On ESP32-P4, rotation is handled by PPA hardware.
             - On other chips, rotation is done in software with performance cost.
             - For 180° rotation, use HFlip + VFlip instead of this option.
 
-            Not currently supported when used simultaneously with XIAOZHI_CAMERA_ALLOW_JPEG_INPUT.
+            Not currently supported when used simultaneously with WISIO_CAMERA_ALLOW_JPEG_INPUT.
 
-    if XIAOZHI_ENABLE_ROTATE_CAMERA_IMAGE
-        choice XIAOZHI_CAMERA_IMAGE_ROTATION_ANGLE
+    if WISIO_ENABLE_ROTATE_CAMERA_IMAGE
+        choice WISIO_CAMERA_IMAGE_ROTATION_ANGLE
             prompt "Camera Image Rotation Angle (clockwise)"
-            default XIAOZHI_CAMERA_IMAGE_ROTATION_ANGLE_90
+            default WISIO_CAMERA_IMAGE_ROTATION_ANGLE_90
             help
                 Camera image rotation angle.
-            config XIAOZHI_CAMERA_IMAGE_ROTATION_ANGLE_90
+            config WISIO_CAMERA_IMAGE_ROTATION_ANGLE_90
                 bool "90°"
-            config XIAOZHI_CAMERA_IMAGE_ROTATION_ANGLE_270
+            config WISIO_CAMERA_IMAGE_ROTATION_ANGLE_270
                 bool "270°"
             comment "For 180° rotation, use HFlip + VFlip instead of this option"
         endchoice

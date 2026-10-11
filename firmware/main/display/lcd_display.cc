@@ -1,5 +1,6 @@
 #include "lcd_display.h"
 #include "assets/lang_config.h"
+#include "charging_font.h"
 #include "gif/lvgl_gif.h"
 #include "lvgl_theme.h"
 #include "settings.h"
@@ -1114,61 +1115,53 @@ void LcdDisplay::ClearChatMessages() {
 }
 #endif
 
-static std::string SanitizeVietnameseForDisplay(const std::string& input) {
-    std::string out;
-    out.reserve(input.size());
-    for (size_t i = 0; i < input.size(); ) {
-        unsigned char c0 = static_cast<unsigned char>(input[i]);
-        if (c0 < 0x80) {
-            out.push_back(input[i++]);
-        } else if (c0 == 0xC4 && i + 1 < input.size()) {
-            unsigned char c1 = static_cast<unsigned char>(input[i + 1]);
-            if (c1 == 0x90) { // Đ -> D
-                out.push_back('D');
-                i += 2;
-            } else {
-                out.push_back(input[i++]);
-            }
-        } else if (c0 == 0xC6 && i + 1 < input.size()) {
-            unsigned char c1 = static_cast<unsigned char>(input[i + 1]);
-            if (c1 == 0xA0) { // Ơ -> O
-                out.push_back('O');
-                i += 2;
-            } else if (c1 == 0xA1) { // ơ -> o
-                out.push_back('o');
-                i += 2;
-            } else if (c1 == 0xAF) { // Ư -> U
-                out.push_back('U');
-                i += 2;
-            } else if (c1 == 0xB0) { // ư -> u
-                out.push_back('u');
-                i += 2;
-            } else {
-                out.push_back(input[i++]);
-            }
-        } else if (c0 == 0xE1 && i + 2 < input.size()) {
-            unsigned char c1 = static_cast<unsigned char>(input[i + 1]);
-            unsigned char c2 = static_cast<unsigned char>(input[i + 2]);
-            if (c1 == 0xBB && c2 >= 0x9A && c2 <= 0xA3) { // Ớ/ờ/Ờ/ở/Ở/ở/Ỡ/ỡ/Ợ/ợ
-                out.push_back((c2 % 2 == 0) ? 'O' : 'o');
-                i += 3;
-            } else if (c1 == 0xBB && c2 >= 0xA8 && c2 <= 0xB1) { // Ứ/ứ/Ừ/ừ/Ử/ử/Ữ/ữ/Ự/ự
-                out.push_back((c2 % 2 == 0) ? 'U' : 'u');
-                i += 3;
-            } else {
-                out.push_back(input[i++]);
-            }
-        } else {
-            out.push_back(input[i++]);
-        }
-    }
-    return out;
-}
-
 void LcdDisplay::ShowMusicPlayer(const std::string& title, const std::string& artist,
                                  uint32_t duration_ms) {
+    ShowMusicPlayerWithCover(title, artist, duration_ms, nullptr, 0x38BDF8);
+}
+
+void LcdDisplay::ShowMusicPlayerWithCover(const std::string& title, const std::string& artist,
+                                          uint32_t duration_ms, std::unique_ptr<LvglImage> image,
+                                          uint32_t accent_color) {
     DisplayLockGuard lock(this);
+    music_active_ = true;
+    music_accent_color_ = accent_color & 0xFFFFFF;
+    ShowMusicPlayerLocked(title, artist, duration_ms);
+    SetMusicCoverLocked(std::move(image));
+    // LVGL cannot paint until this lock is released: art, title and progress
+    // become visible in the same frame, including when cover loading failed.
+    lv_obj_remove_flag(music_top_panel_, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_move_foreground(music_top_panel_);
+    lv_obj_remove_flag(music_bottom_panel_, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_move_foreground(music_bottom_panel_);
+}
+
+void LcdDisplay::ShowMusicPlayerLocked(const std::string& title, const std::string& artist,
+                                       uint32_t duration_ms) {
     auto screen = lv_screen_active();
+    if (music_placeholder_ == nullptr) {
+        music_placeholder_ = lv_obj_create(screen);
+        lv_obj_remove_style_all(music_placeholder_);
+        lv_obj_set_size(music_placeholder_, width_, height_);
+        lv_obj_center(music_placeholder_);
+        lv_obj_set_style_bg_color(music_placeholder_, lv_color_hex(0x0F172A), 0);
+        lv_obj_set_style_bg_opa(music_placeholder_, LV_OPA_COVER, 0);
+        lv_obj_remove_flag(music_placeholder_, LV_OBJ_FLAG_SCROLLABLE);
+        auto* record = lv_obj_create(music_placeholder_);
+        lv_obj_remove_style_all(record);
+        lv_obj_set_size(record, 132, 132);
+        lv_obj_center(record);
+        lv_obj_set_style_radius(record, LV_RADIUS_CIRCLE, 0);
+        lv_obj_set_style_bg_color(record, lv_color_hex(0x1E293B), 0);
+        lv_obj_set_style_bg_opa(record, LV_OPA_COVER, 0);
+        lv_obj_set_style_border_width(record, 4, 0);
+        lv_obj_set_style_border_color(record, lv_color_hex(0x38BDF8), 0);
+        auto* label = lv_label_create(record);
+        lv_label_set_text(label, "WISIO\nMUSIC");
+        lv_obj_set_style_text_color(label, lv_color_hex(0xF8FAFC), 0);
+        lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_CENTER, 0);
+        lv_obj_center(label);
+    }
     if (music_cover_image_ == nullptr) {
         music_cover_image_ = lv_image_create(screen);
         lv_obj_add_flag(music_cover_image_, LV_OBJ_FLAG_HIDDEN);
@@ -1213,7 +1206,8 @@ void LcdDisplay::ShowMusicPlayer(const std::string& title, const std::string& ar
         lv_obj_set_style_bg_color(music_progress_bar_, lv_color_hex(0x334155), 0);
         lv_obj_set_style_bg_opa(music_progress_bar_, LV_OPA_COVER, 0);
         lv_obj_set_style_radius(music_progress_bar_, 0, LV_PART_INDICATOR);
-        lv_obj_set_style_bg_color(music_progress_bar_, lv_color_hex(music_accent_color_), LV_PART_INDICATOR);
+        lv_obj_set_style_bg_color(music_progress_bar_, lv_color_hex(music_accent_color_),
+                                  LV_PART_INDICATOR);
         lv_obj_set_style_bg_opa(music_progress_bar_, LV_OPA_COVER, LV_PART_INDICATOR);
 
         // Centered prominent time label: "00:00 / 04:28"
@@ -1228,7 +1222,6 @@ void LcdDisplay::ShowMusicPlayer(const std::string& title, const std::string& ar
     if (!artist.empty() && artist != "YouTube" && title.find(artist) == std::string::npos) {
         display_title = title + " - " + artist;
     }
-    display_title = SanitizeVietnameseForDisplay(display_title);
     lv_label_set_text(music_title_label_, display_title.c_str());
     lv_bar_set_value(music_progress_bar_, 0, LV_ANIM_OFF);
     char total[16];
@@ -1241,16 +1234,31 @@ void LcdDisplay::ShowMusicPlayer(const std::string& title, const std::string& ar
     snprintf(time_text, sizeof(time_text), "00:00 / %s", total);
     lv_label_set_text(music_time_label_, time_text);
 
+    // A new track must never reveal the last emotion or the previous cover.
+    lv_obj_add_flag(music_cover_image_, LV_OBJ_FLAG_HIDDEN);
+    music_cover_cached_.reset();
+    lv_obj_remove_flag(music_placeholder_, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_move_foreground(music_placeholder_);
+    esp_timer_stop(preview_timer_);
+    if (preview_image_ != nullptr) {
+        lv_obj_add_flag(preview_image_, LV_OBJ_FLAG_HIDDEN);
+        preview_image_cached_.reset();
+    }
+    if (gif_controller_) {
+        gif_controller_->Stop();
+    }
+    if (emoji_box_ != nullptr) {
+        lv_obj_add_flag(emoji_box_, LV_OBJ_FLAG_HIDDEN);
+    }
+    lv_obj_set_style_bg_color(music_progress_bar_, lv_color_hex(music_accent_color_),
+                              LV_PART_INDICATOR);
+
     if (top_bar_ != nullptr) {
         lv_obj_add_flag(top_bar_, LV_OBJ_FLAG_HIDDEN);
     }
     if (bottom_bar_ != nullptr) {
         lv_obj_add_flag(bottom_bar_, LV_OBJ_FLAG_HIDDEN);
     }
-    lv_obj_remove_flag(music_top_panel_, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_move_foreground(music_top_panel_);
-    lv_obj_remove_flag(music_bottom_panel_, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_move_foreground(music_bottom_panel_);
 }
 
 void LcdDisplay::SetMusicAccentColor(uint32_t color) {
@@ -1262,12 +1270,16 @@ void LcdDisplay::SetMusicAccentColor(uint32_t color) {
 }
 
 void LcdDisplay::SetMusicCover(std::unique_ptr<LvglImage> image) {
-    if (image == nullptr) {
+    DisplayLockGuard lock(this);
+    if (!music_active_) {
         return;
     }
-    DisplayLockGuard lock(this);
-    if (music_cover_image_ == nullptr) {
-        ESP_LOGW(TAG, "Music cover arrived before music player metadata");
+    SetMusicCoverLocked(std::move(image));
+}
+
+void LcdDisplay::SetMusicCoverLocked(std::unique_ptr<LvglImage> image) {
+    if (image == nullptr || image->image_dsc() == nullptr || image->image_dsc()->header.w == 0 ||
+        image->image_dsc()->header.h == 0) {
         return;
     }
     music_cover_cached_ = std::move(image);
@@ -1280,16 +1292,8 @@ void LcdDisplay::SetMusicCover(std::unique_ptr<LvglImage> image) {
         lv_image_set_scale(music_cover_image_, scale_x > scale_y ? scale_x : scale_y);
         lv_obj_center(music_cover_image_);
     }
-    esp_timer_stop(preview_timer_);
-    if (preview_image_ != nullptr) {
-        lv_obj_add_flag(preview_image_, LV_OBJ_FLAG_HIDDEN);
-        preview_image_cached_.reset();
-    }
-    if (gif_controller_) {
-        gif_controller_->Stop();
-    }
-    if (emoji_box_ != nullptr) {
-        lv_obj_add_flag(emoji_box_, LV_OBJ_FLAG_HIDDEN);
+    if (music_placeholder_ != nullptr) {
+        lv_obj_add_flag(music_placeholder_, LV_OBJ_FLAG_HIDDEN);
     }
     lv_obj_remove_flag(music_cover_image_, LV_OBJ_FLAG_HIDDEN);
     lv_obj_move_foreground(music_cover_image_);
@@ -1329,6 +1333,7 @@ void LcdDisplay::UpdateMusicProgress(uint32_t position_ms, uint32_t duration_ms)
 
 void LcdDisplay::HideMusicPlayer() {
     DisplayLockGuard lock(this);
+    music_active_ = false;
     if (music_top_panel_ != nullptr) {
         lv_obj_add_flag(music_top_panel_, LV_OBJ_FLAG_HIDDEN);
     }
@@ -1337,6 +1342,9 @@ void LcdDisplay::HideMusicPlayer() {
     }
     if (music_cover_image_ != nullptr) {
         lv_obj_add_flag(music_cover_image_, LV_OBJ_FLAG_HIDDEN);
+    }
+    if (music_placeholder_ != nullptr) {
+        lv_obj_add_flag(music_placeholder_, LV_OBJ_FLAG_HIDDEN);
     }
     music_cover_cached_.reset();
     if (top_bar_ != nullptr) {
@@ -1350,7 +1358,53 @@ void LcdDisplay::HideMusicPlayer() {
     }
 }
 
+void LcdDisplay::ShowChargingScreen(int battery_level) {
+    DisplayLockGuard lock(this);
+    if (charging_overlay_ == nullptr) {
+        charging_overlay_ = lv_obj_create(lv_layer_top());
+        lv_obj_remove_style_all(charging_overlay_);
+        // Overscan by two pixels on every edge. Some panel/rotation setups
+        // otherwise expose a one-pixel strip from the underlying screen.
+        lv_obj_set_pos(charging_overlay_, -2, -2);
+        lv_obj_set_size(charging_overlay_, LV_HOR_RES + 4, LV_VER_RES + 4);
+        lv_obj_set_style_radius(charging_overlay_, 0, 0);
+        lv_obj_set_style_border_width(charging_overlay_, 0, 0);
+        lv_obj_set_style_outline_width(charging_overlay_, 0, 0);
+        lv_obj_set_style_shadow_width(charging_overlay_, 0, 0);
+        lv_obj_set_style_pad_all(charging_overlay_, 0, 0);
+        lv_obj_set_style_bg_color(charging_overlay_, lv_color_hex(0x071A12), 0);
+        lv_obj_set_style_bg_opa(charging_overlay_, LV_OPA_COVER, 0);
+        lv_obj_clear_flag(charging_overlay_, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_set_scrollbar_mode(charging_overlay_, LV_SCROLLBAR_MODE_OFF);
+        charging_label_ = lv_label_create(charging_overlay_);
+        // The charging font includes Đ and Ạ before downloadable fonts load.
+        lv_obj_set_width(charging_label_, LV_HOR_RES - 24);
+        lv_label_set_long_mode(charging_label_, LV_LABEL_LONG_WRAP);
+        lv_obj_set_style_text_font(charging_label_, &charging_font, 0);
+        lv_obj_set_style_text_color(charging_label_, lv_color_hex(0x4ADE80), 0);
+        lv_obj_set_style_text_align(charging_label_, LV_TEXT_ALIGN_CENTER, 0);
+        lv_obj_center(charging_label_);
+    }
+    char text[48];
+    snprintf(text, sizeof(text), "ĐANG SẠC\n%d%%", std::max(0, std::min(100, battery_level)));
+    lv_label_set_text(charging_label_, text);
+    lv_obj_remove_flag(charging_overlay_, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_move_foreground(charging_overlay_);
+}
+
+void LcdDisplay::HideChargingScreen() {
+    DisplayLockGuard lock(this);
+    if (charging_overlay_ != nullptr) {
+        lv_obj_add_flag(charging_overlay_, LV_OBJ_FLAG_HIDDEN);
+    }
+}
+
 void LcdDisplay::SetEmotion(const char* emotion) {
+    if (music_active_) {
+        // The current music screen owns the foreground. Avoid starting a
+        // hidden GIF that would compete for redraw time during playback.
+        return;
+    }
     if (!setup_ui_called_) {
         ESP_LOGW(TAG, "SetEmotion('%s') called before SetupUI() - emotion will not be displayed!",
                  emotion);

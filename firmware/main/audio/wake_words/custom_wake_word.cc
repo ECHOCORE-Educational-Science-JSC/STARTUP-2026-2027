@@ -16,6 +16,9 @@ CustomWakeWord::CustomWakeWord()
 }
 
 CustomWakeWord::~CustomWakeWord() {
+    if (commands_allocated_) {
+        esp_mn_commands_free();
+    }
     if (multinet_model_data_ != nullptr && multinet_ != nullptr) {
         multinet_->destroy(multinet_model_data_);
         multinet_model_data_ = nullptr;
@@ -81,7 +84,6 @@ void CustomWakeWord::ParseWakenetModelConfig() {
     cJSON_Delete(root);
 }
 
-
 bool CustomWakeWord::Initialize(AudioCodec* codec, srmodel_list_t* models_list) {
     codec_ = codec;
     commands_.clear();
@@ -107,25 +109,49 @@ bool CustomWakeWord::Initialize(AudioCodec* codec, srmodel_list_t* models_list) 
     // 初始化 multinet (命令词识别)
     mn_name_ = esp_srmodel_filter(models_, ESP_MN_PREFIX, language_.c_str());
     if (mn_name_ == nullptr) {
-        ESP_LOGW(TAG, "Language '%s' multinet not found, falling back to any multinet model", language_.c_str());
+        ESP_LOGW(TAG, "Language '%s' multinet not found, falling back to any multinet model",
+                 language_.c_str());
         mn_name_ = esp_srmodel_filter(models_, ESP_MN_PREFIX, NULL);
     }
     if (mn_name_ == nullptr) {
         ESP_LOGE(TAG, "Failed to initialize multinet, mn_name is nullptr");
-        ESP_LOGI(TAG, "Please refer to https://pcn7cs20v8cr.feishu.cn/wiki/CpQjwQsCJiQSWSkYEvrcxcbVnwh to add custom wake word");
+        ESP_LOGI(TAG,
+                 "Please refer to https://pcn7cs20v8cr.feishu.cn/wiki/CpQjwQsCJiQSWSkYEvrcxcbVnwh "
+                 "to add custom wake word");
         return false;
     }
 
     multinet_ = esp_mn_handle_from_name(mn_name_);
+    if (multinet_ == nullptr || commands_.empty()) {
+        ESP_LOGE(TAG, "No MultiNet interface or configured wake command");
+        return false;
+    }
     multinet_model_data_ = multinet_->create(mn_name_, duration_);
+    if (multinet_model_data_ == nullptr) {
+        ESP_LOGE(TAG, "Could not allocate MultiNet model");
+        return false;
+    }
     multinet_->set_det_threshold(multinet_model_data_, threshold_);
     input_buffer_.reserve(multinet_->get_samp_chunksize(multinet_model_data_));
+    // The command registry must be bound to this model before clear/add/update.
+    // Otherwise ESP-SR rejects every custom phrase, even with a valid model.
+    if (esp_mn_commands_alloc(multinet_, multinet_model_data_) != ESP_OK) {
+        ESP_LOGE(TAG, "Could not initialize the MultiNet command registry");
+        return false;
+    }
+    commands_allocated_ = true;
     esp_mn_commands_clear();
     for (int i = 0; i < commands_.size(); i++) {
-        esp_mn_commands_add(i + 1, commands_[i].command.c_str());
+        if (esp_mn_commands_add(i + 1, commands_[i].command.c_str()) != ESP_OK) {
+            ESP_LOGE(TAG, "Wake command could not be registered: %s", commands_[i].command.c_str());
+            return false;
+        }
     }
-    esp_mn_commands_update();
-    
+    if (esp_mn_commands_update() != nullptr) {
+        ESP_LOGE(TAG, "MultiNet rejected the wake command vocabulary");
+        return false;
+    }
+
     multinet_->print_active_speech_commands(multinet_model_data_);
 #if CONFIG_SEND_WAKE_WORD_DATA
     if (!wake_word_audio_cache_.Initialize(16000 * 2)) {
@@ -189,9 +215,13 @@ void CustomWakeWord::FeedSamples(const int16_t* data, size_t samples, bool mono)
         if (mn_state == ESP_MN_STATE_DETECTED) {
             esp_mn_results_t *mn_result = multinet_->get_results(multinet_model_data_);
             for (int i = 0; i < mn_result->num && running_; i++) {
-                ESP_LOGI(TAG, "Custom wake word detected: command_id=%d, string=%s, prob=%f", 
-                        mn_result->command_id[i], mn_result->string, mn_result->prob[i]);
-                auto& command = commands_[mn_result->command_id[i] - 1];
+                const int command_id = mn_result->command_id[i];
+                if (command_id <= 0 || static_cast<size_t>(command_id) > commands_.size() ||
+                    mn_result->prob[i] < threshold_)
+                    continue;
+                ESP_LOGI(TAG, "Custom wake word detected: command_id=%d, string=%s, prob=%f",
+                         mn_result->command_id[i], mn_result->string, mn_result->prob[i]);
+                auto& command = commands_[command_id - 1];
                 if (command.action == "wake") {
                     last_detected_wake_word_ = command.text;
                     running_ = false;

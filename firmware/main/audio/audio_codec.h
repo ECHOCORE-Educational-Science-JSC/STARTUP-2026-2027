@@ -19,9 +19,9 @@
 // Keep numeric I2S controller IDs usable on targets where IDF 5 does not expose
 // every value through the target-specific i2s_port_t enum (for example ESP32-C3).
 #if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(6, 0, 0)
-#define XIAOZHI_I2S_PORT(port) (port)
+#define WISIO_I2S_PORT(port) (port)
 #else
-#define XIAOZHI_I2S_PORT(port) static_cast<i2s_port_t>(port)
+#define WISIO_I2S_PORT(port) static_cast<i2s_port_t>(port)
 #endif
 
 class AudioCodec {

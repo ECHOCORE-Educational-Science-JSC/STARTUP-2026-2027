@@ -15,9 +15,9 @@ idf.py menuconfig
 **选择板子：**
 
 ```
-Xiaozhi Assistant -> Board Type -> LILYGO T-Display-S3-Pro-MVSRLora
+Wisio Assistant -> Board Type -> LILYGO T-Display-S3-Pro-MVSRLora
 Or
-Xiaozhi Assistant -> Board Type -> LILYGO T-Display-S3-Pro-MVSRLora_NO_BATTERY
+Wisio Assistant -> Board Type -> LILYGO T-Display-S3-Pro-MVSRLora_NO_BATTERY
 ```
 
 

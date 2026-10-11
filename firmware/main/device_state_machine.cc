@@ -80,9 +80,9 @@ bool DeviceStateMachine::IsValidTransition(DeviceState from, DeviceState to) con
                    to == kDeviceStateWifiConfiguring;
 
         case kDeviceStateConnecting:
-            // Can go to idle (failed) or listening (success)
-            return to == kDeviceStateIdle ||
-                   to == kDeviceStateListening;
+            // A server greeting can start playback before microphone capture.
+            return to == kDeviceStateIdle || to == kDeviceStateListening ||
+                   to == kDeviceStateSpeaking;
 
         case kDeviceStateListening:
             // Can go to speaking or idle

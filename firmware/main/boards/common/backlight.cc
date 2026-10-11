@@ -44,12 +44,9 @@ void Backlight::RestoreBrightness() {
 }
 
 void Backlight::SetBrightness(uint8_t brightness, bool permanent) {
+    std::lock_guard<std::mutex> lock(transition_mutex_);
     if (brightness > 100) {
         brightness = 100;
-    }
-
-    if (brightness_ == brightness) {
-        return;
     }
 
     if (permanent) {
@@ -58,6 +55,14 @@ void Backlight::SetBrightness(uint8_t brightness, bool permanent) {
     }
 
     target_brightness_ = brightness;
+    // Keep the desired brightness, but no UI timer or MCP request can relight
+    // a display suspended for charging.
+    if (power_save_)
+        return;
+    if (brightness_ == target_brightness_) {
+        esp_timer_stop(transition_timer_);
+        return;
+    }
     step_ = (target_brightness_ > brightness_) ? 1 : -1;
 
     if (transition_timer_ != nullptr) {
@@ -67,7 +72,25 @@ void Backlight::SetBrightness(uint8_t brightness, bool permanent) {
     ESP_LOGI(TAG, "Set brightness to %d", brightness);
 }
 
+void Backlight::SetPowerSaveMode(bool on) {
+    std::lock_guard<std::mutex> lock(transition_mutex_);
+    if (power_save_ == on)
+        return;
+    power_save_ = on;
+    esp_timer_stop(transition_timer_);
+    if (on) {
+        brightness_ = 0;
+        SetBrightnessImpl(0);
+    } else if (brightness_ != target_brightness_) {
+        step_ = target_brightness_ > brightness_ ? 1 : -1;
+        esp_timer_start_periodic(transition_timer_, 5 * 1000);
+    }
+}
+
 void Backlight::OnTransitionTimer() {
+    std::lock_guard<std::mutex> lock(transition_mutex_);
+    if (power_save_)
+        return;
     if (brightness_ == target_brightness_) {
         esp_timer_stop(transition_timer_);
         return;

@@ -20,7 +20,7 @@ idf.py menuconfig
 **选择板子：**
 
 ```
-Xiaozhi Assistant -> Target Board -> WDMomo ESP32-CGC-144
+Wisio Assistant -> Target Board -> WDMomo ESP32-CGC-144
 ```
 
 **编译：**

@@ -25,6 +25,7 @@
 #include <lwip/sockets.h>
 #include <mbedtls/base64.h>
 #include <cerrno>
+#include <algorithm>
 #include <cstring>
 #include <limits>
 
@@ -113,6 +114,75 @@ Application::~Application() {
 }
 
 bool Application::SetDeviceState(DeviceState state) { return state_machine_.TransitionTo(state); }
+
+void Application::SetChargingMode(bool charging, int battery_level) {
+    const bool previous = charging_mode_.exchange(charging);
+    if (previous == charging) {
+        return;
+    }
+
+    // Gate both capture and wake-word paths immediately. The rest runs on the
+    // main task so state, protocol, decoder and LVGL updates remain serialized.
+    audio_service_.SetSuspended(charging);
+    if (charging) {
+        audio_service_.EnableVoiceProcessing(false);
+        audio_service_.EnableWakeWordDetection(false);
+    }
+    Schedule([this, charging]() {
+        // A fast plug/unplug can supersede a callback before the main task runs.
+        if (charging_mode_.load() != charging) {
+            return;
+        }
+        auto& board = Board::GetInstance();
+        auto display = board.GetDisplay();
+        auto codec = board.GetAudioCodec();
+        if (charging) {
+            if (GetDeviceState() == kDeviceStateNotifying) {
+                StopNotification();
+            }
+            if (protocol_ && (GetDeviceState() == kDeviceStateSpeaking ||
+                              GetDeviceState() == kDeviceStateListening)) {
+                protocol_->SendAbortSpeaking(kAbortReasonNone);
+            }
+            pending_listening_start_ = false;
+            music_playback_ = false;
+            music_idle_seconds_ = 0;
+            music_playback_token_.clear();
+            notify_player_.Stop();
+            audio_service_.EnableVoiceProcessing(false);
+            audio_service_.EnableWakeWordDetection(false);
+            audio_service_.ResetDecoder();
+            while (audio_service_.PopPacketFromSendQueue()) {
+            }
+            codec->EnableInput(false);
+            codec->EnableOutput(false);
+            if (auto* backlight = board.GetBacklight())
+                backlight->SetPowerSaveMode(true);
+            display->HideMusicPlayer();
+            display->HideChargingScreen();
+            display->SetPowerSaveMode(true);
+            if (protocol_ && protocol_->IsAudioChannelOpened())
+                protocol_->CloseAudioChannel();
+            if (GetDeviceState() == kDeviceStateSpeaking ||
+                GetDeviceState() == kDeviceStateListening ||
+                GetDeviceState() == kDeviceStateConnecting)
+                SetDeviceState(kDeviceStateIdle);
+            board.SetPowerSaveLevel(PowerSaveLevel::LOW_POWER);
+            board.GetLed()->OnStateChanged();
+            ESP_LOGI(TAG, "Charging-only mode enabled");
+        } else {
+            display->HideChargingScreen();
+            display->SetPowerSaveMode(false);
+            if (auto* backlight = board.GetBacklight())
+                backlight->SetPowerSaveMode(false);
+            codec->EnableInput(true);
+            audio_service_.EnableVoiceProcessing(false);
+            audio_service_.EnableWakeWordDetection(true);
+            SetDeviceState(kDeviceStateIdle);
+            ESP_LOGI(TAG, "Charging-only mode disabled");
+        }
+    });
+}
 
 void Application::Initialize() {
     auto& board = Board::GetInstance();
@@ -296,6 +366,9 @@ void Application::Run() {
 
         if (bits & MAIN_EVENT_SEND_AUDIO) {
             while (auto packet = audio_service_.PopPacketFromSendQueue()) {
+                if (charging_mode_.load()) {
+                    continue;
+                }
                 if (protocol_ && !protocol_->SendAudio(std::move(packet))) {
                     // Drop the remaining packets. Leaving them in the queue would
                     // stall the Opus codec task (it waits for queue space), which in
@@ -329,6 +402,7 @@ void Application::Run() {
         }
 
         if (bits & MAIN_EVENT_CLOCK_TICK) {
+            if (charging_mode_.load()) continue;
             clock_ticks_++;
             auto display = Board::GetInstance().GetDisplay();
             display->UpdateStatusBar();
@@ -437,22 +511,25 @@ void Application::HandleActivationDoneEvent() {
                     vTaskDelay(pdMS_TO_TICKS(100));
                 }
                 vTaskDelay(pdMS_TO_TICKS(150));
-                app->Schedule([app]() { app->PlaySound(Lang::Sounds::OGG_SUCCESS); });
+                app->Schedule([app]() {
+                    if (!app->IsChargingMode()) app->PlaySound(Lang::Sounds::OGG_SUCCESS);
+                });
                 // Open the first conversation after the ready chime so the
                 // server can introduce Wisio without waiting for a button.
                 vTaskDelay(pdMS_TO_TICKS(900));
                 app->Schedule([app]() {
-                    if (app->GetDeviceState() == kDeviceStateIdle) {
+                    if (!app->IsChargingMode() &&
+                        app->GetDeviceState() == kDeviceStateIdle) {
                         app->ToggleChatState();
                     }
                 });
                 vTaskDelete(nullptr);
             },
             "ready_chime", 2048, this, 2, nullptr) != pdPASS) {
-        Schedule([this]() { audio_service_.PlaySound(Lang::Sounds::OGG_SUCCESS); });
+        Schedule([this]() { PlaySound(Lang::Sounds::OGG_SUCCESS); });
     }
 #else
-    Schedule([this]() { audio_service_.PlaySound(Lang::Sounds::OGG_SUCCESS); });
+    Schedule([this]() { PlaySound(Lang::Sounds::OGG_SUCCESS); });
 #endif
 }
 
@@ -662,7 +739,7 @@ void Application::InitializeProtocol() {
     display->SetStatus(Lang::Strings::LOADING_PROTOCOL);
 
 // This Freenove build uses the PC bridge. An old MQTT configuration in flash
-// must never silently reconnect it to the public XiaoZhi service.
+// must never silently reconnect it to the public Wisio service.
 #if CONFIG_BOARD_TYPE_Freenove_ESP32S3_DISPLAY_2_8_LCD
     protocol_ = std::make_unique<WebsocketProtocol>();
 #else
@@ -686,6 +763,9 @@ void Application::InitializeProtocol() {
     });
 
     protocol_->OnIncomingAudio([this](std::unique_ptr<AudioStreamPacket> packet) {
+        if (charging_mode_.load()) {
+            return;
+        }
         if (GetDeviceState() == kDeviceStateSpeaking) {
             if (!audio_service_.PushPacketToDecodeQueue(std::move(packet))) {
                 static int64_t last_decode_drop_log_us = 0;
@@ -699,6 +779,14 @@ void Application::InitializeProtocol() {
     });
 
     protocol_->OnAudioChannelOpened([this, codec, &board]() {
+        if (charging_mode_.load()) {
+            Schedule([this]() {
+                if (charging_mode_.load() && protocol_ && protocol_->IsAudioChannelOpened()) {
+                    protocol_->CloseAudioChannel();
+                }
+            });
+            return;
+        }
         board.SetPowerSaveLevel(PowerSaveLevel::PERFORMANCE);
         if (protocol_->server_sample_rate() != codec->output_sample_rate()) {
             ESP_LOGW(TAG,
@@ -722,6 +810,10 @@ void Application::InitializeProtocol() {
         auto type = cJSON_GetObjectItem(root, "type");
         if (!cJSON_IsString(type)) {
             ESP_LOGW(TAG, "Incoming JSON message has no type");
+            return;
+        }
+        if (charging_mode_.load()) {
+            ESP_LOGD(TAG, "Ignored %s while charging", type->valuestring);
             return;
         }
         if (strcmp(type->valuestring, "notify") == 0) {
@@ -757,6 +849,33 @@ void Application::InitializeProtocol() {
                       subtitles = std::move(subtitles)]() mutable {
                 StartNotification(std::move(url), std::move(subtitles));
             });
+        } else if (strcmp(type->valuestring, "volume") == 0) {
+            auto action_json = cJSON_GetObjectItem(root, "action");
+            if (!cJSON_IsString(action_json)) {
+                return;
+            }
+            const std::string action(action_json->valuestring);
+            auto value_json = cJSON_GetObjectItem(root, "value");
+            auto step_json = cJSON_GetObjectItem(root, "step");
+            const int value = cJSON_IsNumber(value_json) ? value_json->valueint : 70;
+            const int step = cJSON_IsNumber(step_json) ? step_json->valueint : 10;
+            Schedule([display, action, value, step]() {
+                auto* codec = Board::GetInstance().GetAudioCodec();
+                int volume = codec->output_volume();
+                if (action == "up")
+                    volume += step;
+                else if (action == "down")
+                    volume -= step;
+                else if (action == "mute")
+                    volume = 0;
+                else if (action == "set")
+                    volume = value;
+                else
+                    return;
+                volume = std::max(0, std::min(100, volume));
+                codec->SetOutputVolume(volume);
+                display->ShowNotification("Âm lượng " + std::to_string(volume) + "%");
+            });
         } else if (strcmp(type->valuestring, "music") == 0) {
             auto state = cJSON_GetObjectItem(root, "state");
             if (!cJSON_IsString(state)) {
@@ -768,10 +887,67 @@ void Application::InitializeProtocol() {
                 token = token_json->valuestring;
             }
             const auto music_state = ParseMusicMessageState(state->valuestring);
+            struct MusicCover {
+                std::unique_ptr<void, decltype(&heap_caps_free)> data{nullptr, heap_caps_free};
+                size_t size = 0;
+                uint32_t accent = 0x38BDF8;
+            };
+            auto ReadMusicCover = [root, display]() {
+                auto cover = std::make_shared<MusicCover>();
+                auto accent = cJSON_GetObjectItem(root, "accent_color");
+                if (cJSON_IsNumber(accent) && accent->valuedouble >= 0 &&
+                    accent->valuedouble <= 0xFFFFFF) {
+                    cover->accent = static_cast<uint32_t>(accent->valuedouble);
+                } else if (cJSON_IsString(accent)) {
+                    const char* text = accent->valuestring;
+                    if (*text == '#')
+                        ++text;
+                    else if (text[0] == '0' && (text[1] == 'x' || text[1] == 'X'))
+                        text += 2;
+                    char* end = nullptr;
+                    const auto color = strtoul(text, &end, 16);
+                    if (strlen(text) == 6 && end == text + 6 && color <= 0xFFFFFF)
+                        cover->accent = static_cast<uint32_t>(color);
+                }
+#if HAVE_LVGL
+                if (dynamic_cast<LvglDisplay*>(display) == nullptr)
+                    return cover;
+#else
+                return cover;
+#endif
+                auto encoded = cJSON_GetObjectItem(root, "data");
+                if (!cJSON_IsString(encoded))
+                    return cover;
+                const size_t encoded_size = strlen(encoded->valuestring);
+                constexpr size_t kMaxEncodedCoverSize = 320 * 1024;
+                constexpr size_t kMaxDecodedCoverSize = 240 * 1024;
+                const size_t allocation_size = (encoded_size / 4) * 3 + 3;
+                if (encoded_size == 0 || encoded_size > kMaxEncodedCoverSize ||
+                    allocation_size > kMaxDecodedCoverSize) {
+                    ESP_LOGW(TAG, "Rejected oversized music cover");
+                    return cover;
+                }
+                cover->data.reset(heap_caps_malloc(allocation_size, MALLOC_CAP_8BIT));
+                if (!cover->data) {
+                    ESP_LOGW(TAG, "Not enough memory for music cover; using music artwork");
+                    return cover;
+                }
+                const int result = mbedtls_base64_decode(
+                    static_cast<unsigned char*>(cover->data.get()), allocation_size, &cover->size,
+                    reinterpret_cast<const unsigned char*>(encoded->valuestring), encoded_size);
+                if (result != 0 ||
+                    !IsMusicCoverPng(static_cast<const uint8_t*>(cover->data.get()), cover->size)) {
+                    ESP_LOGW(TAG, "Rejected invalid music cover; using music artwork");
+                    cover->data.reset();
+                    cover->size = 0;
+                }
+                return cover;
+            };
             if (music_state == MusicMessageState::kStart) {
                 auto title_json = cJSON_GetObjectItem(root, "title");
                 auto artist_json = cJSON_GetObjectItem(root, "artist");
                 auto duration_json = cJSON_GetObjectItem(root, "duration_ms");
+                auto position_json = cJSON_GetObjectItem(root, "position_ms");
                 std::string title =
                     cJSON_IsString(title_json) && strlen(title_json->valuestring) <= 160
                         ? title_json->valuestring
@@ -785,14 +961,49 @@ void Application::InitializeProtocol() {
                     duration_json->valuedouble <= std::numeric_limits<uint32_t>::max()) {
                     duration_ms = static_cast<uint32_t>(duration_json->valuedouble);
                 }
+                const bool has_position =
+                    cJSON_IsNumber(position_json) && position_json->valuedouble >= 0 &&
+                    position_json->valuedouble <= std::numeric_limits<uint32_t>::max();
+                const uint32_t position_ms =
+                    has_position
+                        ? ClampMusicPosition(static_cast<uint32_t>(position_json->valuedouble),
+                                             duration_ms)
+                        : 0;
+                auto cover = ReadMusicCover();
                 Schedule([this, display, token = std::move(token), title = std::move(title),
-                          artist = std::move(artist), duration_ms]() {
+                          artist = std::move(artist), duration_ms, has_position, position_ms,
+                          cover]() {
+                    const bool same_playback =
+                        music_playback_ && !token.empty() && music_playback_token_ == token;
                     music_playback_ = true;
                     aborted_ = false;
                     music_idle_seconds_ = 0;
-                    if (!token.empty()) {
+                    if (same_playback) {
+                        // A late listen event reasserts the existing player;
+                        // keep its cover and never reset elapsed time to zero.
+                        if (has_position) {
+                            display->UpdateMusicProgress(position_ms, duration_ms);
+                        }
+                    } else if (!token.empty()) {
                         music_playback_token_ = token;
-                        display->ShowMusicPlayer(title, artist, duration_ms);
+#if HAVE_LVGL
+                        if (auto* lvgl_display = dynamic_cast<LvglDisplay*>(display)) {
+                            DisplayLockGuard lock(lvgl_display);
+                            std::unique_ptr<LvglImage> image;
+                            if (cover->data) {
+                                try {
+                                    image = std::make_unique<LvglAllocatedImage>(cover->data.get(),
+                                                                                 cover->size);
+                                    cover->data.release();
+                                } catch (const std::exception& error) {
+                                    ESP_LOGW(TAG, "Cannot decode music cover: %s", error.what());
+                                }
+                            }
+                            lvgl_display->ShowMusicPlayerWithCover(title, artist, duration_ms,
+                                                                   std::move(image), cover->accent);
+                        } else
+#endif
+                            display->ShowMusicPlayer(title, artist, duration_ms);
                     }
                     SetDeviceState(kDeviceStateSpeaking);
                     // Music must only be interrupted by a physical button or touch.
@@ -800,57 +1011,15 @@ void Application::InitializeProtocol() {
                     audio_service_.EnableWakeWordDetection(false);
                 });
             } else if (music_state == MusicMessageState::kCover) {
-                auto encoded = cJSON_GetObjectItem(root, "data");
-                if (token.empty() || !cJSON_IsString(encoded)) {
-                    ESP_LOGW(TAG, "Music cover requires a token and base64 data");
+                if (token.empty()) {
+                    ESP_LOGW(TAG, "Music cover requires a token");
                     return;
                 }
-                auto accent_item = cJSON_GetObjectItem(root, "accent_color");
-                uint32_t accent_color = 0;
-                if (cJSON_IsNumber(accent_item)) {
-                    accent_color = static_cast<uint32_t>(accent_item->valueint);
-                } else if (cJSON_IsString(accent_item) && accent_item->valuestring != nullptr) {
-                    const char* str = accent_item->valuestring;
-                    if (str[0] == '#') {
-                        str++;
-                    } else if (str[0] == '0' && (str[1] == 'x' || str[1] == 'X')) {
-                        str += 2;
-                    }
-                    accent_color = static_cast<uint32_t>(strtoul(str, nullptr, 16));
-                }
-                const size_t encoded_size = strlen(encoded->valuestring);
-                constexpr size_t kMaxEncodedCoverSize = 320 * 1024;
-                constexpr size_t kMaxDecodedCoverSize = 240 * 1024;
-                if (encoded_size == 0 || encoded_size > kMaxEncodedCoverSize) {
-                    ESP_LOGW(TAG, "Rejected oversized music cover");
+                auto cover = ReadMusicCover();
+                if (!cover->data)
                     return;
-                }
-                const size_t allocation_size = (encoded_size / 4) * 3 + 3;
-                if (allocation_size > kMaxDecodedCoverSize) {
-                    ESP_LOGW(TAG, "Rejected music cover allocation");
-                    return;
-                }
-                auto* image_data =
-                    static_cast<uint8_t*>(heap_caps_malloc(allocation_size, MALLOC_CAP_8BIT));
-                if (image_data == nullptr) {
-                    ESP_LOGE(TAG, "Not enough memory for music cover");
-                    return;
-                }
-                size_t decoded_size = 0;
-                const int decode_result = mbedtls_base64_decode(
-                    image_data, allocation_size, &decoded_size,
-                    reinterpret_cast<const unsigned char*>(encoded->valuestring), encoded_size);
-                constexpr uint8_t kPngSignature[] = {0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n'};
-                if (decode_result != 0 || decoded_size < sizeof(kPngSignature) ||
-                    memcmp(image_data, kPngSignature, sizeof(kPngSignature)) != 0) {
-                    ESP_LOGW(TAG, "Rejected invalid music cover");
-                    heap_caps_free(image_data);
-                    return;
-                }
-                Schedule([this, display, token = std::move(token), image_data, decoded_size, accent_color]() {
-                    std::unique_ptr<void, decltype(&heap_caps_free)> data(image_data,
-                                                                          heap_caps_free);
-                    if (music_playback_token_ != token) {
+                Schedule([this, display, token = std::move(token), cover]() {
+                    if (!music_playback_ || music_playback_token_ != token) {
                         return;
                     }
 #if HAVE_LVGL
@@ -858,13 +1027,13 @@ void Application::InitializeProtocol() {
                     if (lvgl_display == nullptr) {
                         return;
                     }
+                    DisplayLockGuard lock(lvgl_display);
                     try {
-                        auto image = std::make_unique<LvglAllocatedImage>(data.get(), decoded_size);
-                        data.release();
+                        auto image =
+                            std::make_unique<LvglAllocatedImage>(cover->data.get(), cover->size);
+                        cover->data.release();
                         lvgl_display->SetMusicCover(std::move(image));
-                        if (accent_color != 0) {
-                            lvgl_display->SetMusicAccentColor(accent_color);
-                        }
+                        lvgl_display->SetMusicAccentColor(cover->accent);
                     } catch (const std::exception& error) {
                         ESP_LOGE(TAG, "Cannot display music cover: %s", error.what());
                     }
@@ -1038,6 +1207,28 @@ void Application::InitializeProtocol() {
                 heap_caps_free(image_data);
 #endif
             });
+        } else if (strcmp(type->valuestring, "listen") == 0) {
+            // The local Gemini bridge sends listen:stop as soon as the user's
+            // utterance is complete. Reflect the processing interval on the
+            // status dot and disable the microphone until a reply is ready.
+            auto state = cJSON_GetObjectItem(root, "state");
+            if (!cJSON_IsString(state)) {
+                return;
+            }
+            if (strcmp(state->valuestring, "stop") == 0) {
+                Schedule([this]() {
+                    if (GetDeviceState() == kDeviceStateListening) {
+                        SetDeviceState(kDeviceStateIdle);
+                    }
+                });
+            } else if (strcmp(state->valuestring, "start") == 0) {
+                Schedule([this]() {
+                    if (GetDeviceState() == kDeviceStateIdle ||
+                        GetDeviceState() == kDeviceStateConnecting) {
+                        SetDeviceState(kDeviceStateListening);
+                    }
+                });
+            }
         } else if (strcmp(type->valuestring, "tts") == 0) {
             auto state = cJSON_GetObjectItem(root, "state");
             if (!cJSON_IsString(state)) {
@@ -1168,7 +1359,7 @@ void Application::ShowActivationCode(const std::string& code, const std::string&
         auto it = std::find_if(digit_sounds.begin(), digit_sounds.end(),
                                [digit](const digit_sound& ds) { return ds.digit == digit; });
         if (it != digit_sounds.end()) {
-            audio_service_.PlaySound(it->sound);
+            PlaySound(it->sound);
         }
     }
 }
@@ -1180,7 +1371,7 @@ void Application::Alert(const char* status, const char* message, const char* emo
     display->SetStatus(status);
     display->SetEmotion(emotion);
     display->SetChatMessage("system", message);
-    if (!sound.empty()) {
+    if (!charging_mode_.load() && !sound.empty()) {
         audio_service_.PlaySound(sound);
     }
 }
@@ -1194,13 +1385,18 @@ void Application::DismissAlert() {
     }
 }
 
-void Application::ToggleChatState() { xEventGroupSetBits(event_group_, MAIN_EVENT_TOGGLE_CHAT); }
+void Application::ToggleChatState() {
+    if (!charging_mode_.load()) xEventGroupSetBits(event_group_, MAIN_EVENT_TOGGLE_CHAT);
+}
 
-void Application::StartListening() { xEventGroupSetBits(event_group_, MAIN_EVENT_START_LISTENING); }
+void Application::StartListening() {
+    if (!charging_mode_.load()) xEventGroupSetBits(event_group_, MAIN_EVENT_START_LISTENING);
+}
 
 void Application::StopListening() { xEventGroupSetBits(event_group_, MAIN_EVENT_STOP_LISTENING); }
 
 void Application::HandleToggleChatEvent() {
+    if (charging_mode_.load()) return;
     auto state = GetDeviceState();
 
     if (state == kDeviceStateNotifying) {
@@ -1245,6 +1441,8 @@ void Application::HandleToggleChatEvent() {
 }
 
 void Application::ContinueOpenAudioChannel(ListeningMode mode) {
+    if (charging_mode_.load())
+        return;
     // Check state again in case it was changed during scheduling
     if (GetDeviceState() != kDeviceStateConnecting) {
         return;
@@ -1263,10 +1461,19 @@ void Application::ContinueOpenAudioChannel(ListeningMode mode) {
         }
     }
 
+    if (protocol_->TakeServerGreetingPending()) {
+        // The server promises an introduction. Wait without capturing speech;
+        // the first actual tts:start moves Connecting directly to Speaking.
+        listening_mode_ = mode;
+        audio_service_.EnableVoiceProcessing(false);
+        audio_service_.EnableWakeWordDetection(false);
+        return;
+    }
     SetListeningMode(mode);
 }
 
 void Application::HandleStartListeningEvent() {
+    if (charging_mode_.load()) return;
     auto state = GetDeviceState();
 
     if (state == kDeviceStateNotifying) {
@@ -1320,6 +1527,7 @@ void Application::HandleStopListeningEvent() {
 }
 
 void Application::HandleWakeWordDetectedEvent() {
+    if (charging_mode_.load()) return;
     if (!protocol_) {
         return;
     }
@@ -1364,6 +1572,8 @@ void Application::HandleWakeWordDetectedEvent() {
 }
 
 void Application::BeginWakeWordInvoke(const std::string& wake_word) {
+    if (charging_mode_.load())
+        return;
     // Must run in the main task with the device in idle state
     audio_service_.EncodeWakeWord();
 
@@ -1388,6 +1598,8 @@ void Application::BeginWakeWordInvoke(const std::string& wake_word) {
 }
 
 void Application::ContinueWakeWordInvoke(const std::string& wake_word) {
+    if (charging_mode_.load())
+        return;
     // Check state again in case it was changed during scheduling
     if (GetDeviceState() != kDeviceStateConnecting) {
         return;
@@ -1405,6 +1617,16 @@ void Application::ContinueWakeWordInvoke(const std::string& wake_word) {
             SetDeviceState(kDeviceStateIdle);
             return;
         }
+    }
+
+    if (protocol_->TakeServerGreetingPending()) {
+        // Do not send the wake-word recording into the fresh introduction.
+        while (auto packet = audio_service_.PopWakeWordPacket()) {
+        }
+        listening_mode_ = GetDefaultListeningMode();
+        audio_service_.EnableVoiceProcessing(false);
+        audio_service_.EnableWakeWordDetection(false);
+        return;
     }
 
     ESP_LOGI(TAG, "Wake word detected: %s", wake_word.c_str());
@@ -1435,6 +1657,13 @@ void Application::HandleStateChangedEvent() {
     auto display = board.GetDisplay();
     auto led = board.GetLed();
     led->OnStateChanged();
+
+    if (charging_mode_.load()) {
+        pending_listening_start_ = false;
+        audio_service_.EnableVoiceProcessing(false);
+        audio_service_.EnableWakeWordDetection(false);
+        return;
+    }
 
     switch (new_state) {
         case kDeviceStateUnknown:
@@ -1502,7 +1731,7 @@ void Application::HandleStateChangedEvent() {
 void Application::StartListeningAudio() {
     // Runs in the main loop, either directly from HandleStateChangedEvent or
     // deferred via MAIN_EVENT_PLAYBACK_DRAINED once the playback queue drains.
-    if (GetDeviceState() != kDeviceStateListening) {
+    if (charging_mode_.load() || GetDeviceState() != kDeviceStateListening) {
         return;
     }
 
@@ -1530,6 +1759,7 @@ void Application::ConfigureWakeWordForListening() {
 }
 
 void Application::StartNotification(std::string audio_url, std::vector<NotifySubtitle> subtitles) {
+    if (charging_mode_.load()) return;
     if (GetDeviceState() != kDeviceStateIdle || notify_player_.IsBusy()) {
         ESP_LOGW(TAG, "Ignoring notify message while device is busy");
         return;
@@ -1700,6 +1930,8 @@ bool Application::UpgradeFirmware(const std::string& url, const std::string& ver
 }
 
 void Application::WakeWordInvoke(const std::string& wake_word) {
+    if (charging_mode_.load())
+        return;
     if (!protocol_) {
         return;
     }
@@ -1710,12 +1942,16 @@ void Application::WakeWordInvoke(const std::string& wake_word) {
         // May be called from outside the main task (e.g. board button
         // callbacks), so schedule the invocation instead of running it here
         Schedule([this, wake_word]() {
+            if (charging_mode_.load())
+                return;
             if (GetDeviceState() == kDeviceStateIdle) {
                 BeginWakeWordInvoke(wake_word);
             }
         });
     } else if (state == kDeviceStateNotifying) {
         Schedule([this, wake_word]() {
+            if (charging_mode_.load())
+                return;
             if (GetDeviceState() == kDeviceStateNotifying) {
                 StopNotification();
                 BeginWakeWordInvoke(wake_word);
@@ -1792,7 +2028,9 @@ void Application::SetAecMode(AecMode mode) {
     });
 }
 
-void Application::PlaySound(const std::string_view& sound) { audio_service_.PlaySound(sound); }
+void Application::PlaySound(const std::string_view& sound) {
+    if (!charging_mode_.load()) audio_service_.PlaySound(sound);
+}
 
 void Application::ResetProtocol() {
     Schedule([this]() {

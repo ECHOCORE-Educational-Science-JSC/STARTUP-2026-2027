@@ -22,7 +22,7 @@ WK 是维控智能的开发板品牌/板卡系列名称。WK ESP32-S3 Dev Board 
 **进入工程**
 
 ```bash
-cd xiaozhi-esp32
+cd wisio-esp32
 ```
 
 **配置编译目标为 ESP32S3**
@@ -40,7 +40,7 @@ idf.py menuconfig
 **选择板子：**
 
 ```
-Xiaozhi Assistant -> Board Type -> 维控智能开发板
+Wisio Assistant -> Board Type -> 维控智能开发板
 ```
 
 **编译：**

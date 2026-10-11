@@ -46,6 +46,10 @@ void Display::UpdateMusicProgress(uint32_t position_ms, uint32_t duration_ms) {}
 
 void Display::HideMusicPlayer() {}
 
+void Display::ShowChargingScreen(int battery_level) {}
+
+void Display::HideChargingScreen() {}
+
 void Display::SetTheme(Theme* theme) {
     current_theme_ = theme;
     Settings settings("display", true);

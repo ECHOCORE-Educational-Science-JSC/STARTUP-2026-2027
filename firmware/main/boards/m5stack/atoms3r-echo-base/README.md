@@ -31,7 +31,7 @@ idf.py menuconfig
 选择板卡：
 
 ```text
-Xiaozhi Assistant -> Board Type -> AtomS3R + Echo Base
+Wisio Assistant -> Board Type -> AtomS3R + Echo Base
 ```
 
 配置 Flash 大小：
@@ -70,15 +70,15 @@ esptool.py --chip esp32s3 merge_bin \
     0x0 build/bootloader/bootloader.bin \
     0x8000 build/partition_table/partition-table.bin \
     0xd000 build/ota_data_initial.bin \
-    0x20000 build/xiaozhi.bin \
+    0x20000 build/wisio.bin \
     0x600000 build/generated_assets.bin \
-    -o AtomS3R-EchoBase-XiaoZhi-v2.2.6_0x00.bin
+    -o AtomS3R-EchoBase-Wisio-v2.2.6_0x00.bin
 ```
 
 烧录合并后的固件：
 
 ```bash
-esptool.py -b 1500000 write_flash -z 0 AtomS3R-EchoBase-XiaoZhi-v2.2.6_0x00.bin
+esptool.py -b 1500000 write_flash -z 0 AtomS3R-EchoBase-Wisio-v2.2.6_0x00.bin
 ```
 
 ## 使用说明

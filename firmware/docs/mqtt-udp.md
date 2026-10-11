@@ -209,6 +209,8 @@ After the device receives the MQTT hello response, it:
 3. Initializes the AES-CTR context.
 4. Opens the UDP socket.
 
+An optional literal `greeting_pending: true` in this hello has the same meaning as in WebSocket: reserve one spoken introduction, keep microphone and wake capture disabled in Connecting, and enter Speaking on the first `tts:start`. Missing, false or non-boolean values leave normal listening unchanged. Each channel open resets the one-shot flag. A server promising an introduction must send `listen:start` when no audio arrives or close a stalled session; see [WebSocket greeting behavior](websocket.md).
+
 ### 4.2 Audio packet format
 
 #### 4.2.1 Encrypted audio packet

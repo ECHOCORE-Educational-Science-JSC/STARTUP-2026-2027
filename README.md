@@ -1,105 +1,55 @@
-# 🌟 DỰ ÁN ROBOT AI WISIO (ECHOCORE STARTUP 2026 - 2027)
+# Wisio — Robot học tiếng Anh
 
-> **Robot AI Giáo Dục & Bạn Đồng Hành Thông Minh Dạy Tiếng Anh Giao Tiếp (A1 - B2) Cho Trẻ Em**
+Firmware ESP32-S3 và bridge Gemini Live chạy trên máy tính cho robot Wisio của EchoCore. Bản phân phối ngày 10/10/2026 dành cho board **Freenove ESP32-S3 Display 2.8 LCD, flash 16 MB, PSRAM 8 MB**.
 
-Dự án phát triển bởi **ECHOCORE Educational Science JSC**. Robot sử dụng vi điều khiển **ESP32-S3 All-in-One 2.8" LCD** kết hợp trí tuệ nhân tạo **Google Gemini Live Audio**, mang đến trải nghiệm học tiếng Anh "vừa học vừa chơi", minh họa từ vựng bằng hình ảnh trực quan trên màn hình, phát nhạc thiếu nhi và trò chuyện thấu cảm như một người bạn thân thiết của bé.
+[Tải gói ZIP mã nguồn + firmware đã build](https://github.com/ECHOCORE-Educational-Science-JSC/STARTUP-2026-2027/raw/refs/heads/main/distributions/WISIO_2026-10-10.zip).
 
----
+## Cài đặt và sử dụng
 
-## 📋 Danh Sách Linh Kiện Phần Cứng (BOM)
+1. Giải nén toàn bộ gói, giữ nguyên cấu trúc thư mục. Cài Python 3.11–3.14 trên Windows nếu máy chưa có.
+2. Chạy `bridge/setup_bridge.cmd` để cài các thư viện. Lần cài đầu cần Internet; gói không chứa môi trường Python của người phát triển.
+3. Chạy `FLASH_FIRMWARE.cmd`, chọn đúng cổng COM và **Full Flash** khi cài bản này lần đầu. Đóng Serial Monitor trước khi nạp. Firmware đã build nằm trong `firmware_bin/`; không cần tự build để sử dụng.
+4. Chạy `START_BRIDGE.cmd`, nhập Gemini API key vào ô nhập ẩn. Giữ cửa sổ bridge mở.
+5. Kết nối robot và máy tính vào cùng mạng Wi-Fi. Robot tìm bridge qua UDP 8004. Nếu không tìm được, nhập URL được bridge in ra trong trang cấu hình Wi-Fi của robot: `http://<IP-máy-tính>:8003/wisio/ota/`.
+6. Muốn bật Google Images: đăng ký SerpApi tại https://serpapi.com/, lấy key rồi chạy `bridge/CONFIGURE_GOOGLE_IMAGES.cmd`. Chạy `bridge/CHECK_GOOGLE_IMAGES.cmd` để kiểm tra. Key được lưu riêng trên máy Windows bằng DPAPI; không gửi key cho người khác.
 
-| Linh Kiện | Mô Tả & Ứng Dụng | Link Tham Khảo |
-| :--- | :--- | :--- |
-| **Bo mạch ESP32-S3 All-in-One 2.8" LCD** | Mạch tích hợp ESP32-S3 (8MB Flash, 8MB PSRAM), màn hình cảm ứng LCD 2.8", loa, micro | [Shopee](https://s.shopee.vn/4fui1g65qI) |
-| **Cảm biến chạm TTP223** | Nút cảm ứng điện dung làm nút đánh thức (Wake button) | [Shopee](https://vn.shp.ee/mf5uxw1e) |
-| **Công tắc gạt 5mm** | Bật/tắt nguồn robot | [Shopee](https://s.shopee.vn/5q6fPt8M1R) |
-| **Pin Polymer 10.000mAh (JST 2.0)** | Cung cấp nguồn điện di động cho robot hoạt động cả ngày | [Shopee](https://s.shopee.vn/903hBiiUQm) |
-| **Jack Type-C Female 4-pin** | Cổng sạc và kết nối nạp firmware tiện lợi | [Shopee](https://vn.shp.ee/EWsXiLnR) |
+Bridge dùng HTTP 8003, WebSocket 8000 và UDP 8004. Cho phép Python qua Windows Firewall trên mạng riêng. Hai phiên bản firmware và bridge trong gói phải được dùng cùng nhau; bản này sử dụng namespace `/wisio/`.
 
----
+## Các phần trong gói
 
-## 📁 Cấu Trúc Mã Nguồn Trong Kho Lưu Trữ
+| Thư mục/file | Nội dung |
+| --- | --- |
+| `bridge/` | Bridge, prompt giáo viên, tìm ảnh, cache/prefetch, âm nhạc và các bài kiểm tra |
+| `firmware/` | Mã nguồn ESP-IDF, driver, cấu hình board và kiểm tra trên máy |
+| `firmware_bin/` | Năm binary đã build, offset nạp và SHA-256 |
+| `FLASH_FIRMWARE.cmd` | Bộ nạp firmware tương tác |
+| `START_BRIDGE.cmd` | Khởi động bridge |
+| `verify_package.py` | Kiểm tra checksum của toàn bộ gói; không nạp hoặc kết nối robot |
+| `VERIFICATION.md` | Kết quả kiểm tra và giới hạn xác nhận |
+| `THIRD_PARTY_NOTICES.md` | Nguồn gốc, giấy phép và định danh dependency cần giữ |
+
+## Hành vi hiện tại
+
+- Giáo viên tiếng Anh cho trẻ 6–14 tuổi, điều chỉnh bài học theo trình độ, khích lệ và sửa lỗi ngữ pháp; hồ sơ học tập lưu cục bộ ở bridge.
+- Minh họa chủ đề bằng Google Images/SerpApi; Gemini kiểm tra **pixel thực tế** trước khi hiển thị. Có cache và tìm trước ảnh. Không hiển thị kết quả chỉ vì trùng từ khóa. Mạng/quota/xác minh có thể lỗi; robot tiếp tục giải thích bằng lời khi không có ảnh phù hợp.
+- Nhạc: **Audius ưu tiên, YouTube dự phòng**. Chỉ báo sẵn sàng sau khi gửi được gói âm thanh đầu tiên; tên bài, bìa và thanh tiến trình được cập nhật cùng màn hình nhạc. Nguồn nhạc vẫn có thể giới hạn vùng hoặc ngừng cung cấp bài.
+- Màn hình ngang quay 180°. Đổi âm lượng bằng lời nói.
+- Board Freenove hiện **không có GPIO báo sạc được nối/cấu hình**. Không suy đoán “đang sạc” từ điện áp pin để tắt robot. Cắm USB-C không tự chứng minh pin đang sạc; chức năng tự dừng khi sạc cần tín hiệu phần cứng được xác định trước.
+
+Không có key, email phụ huynh, hồ sơ người học, cache ảnh hay bản ghi âm cá nhân trong gói. Chúng được tạo riêng trên máy người dùng khi cấu hình/sử dụng.
+
+## Build từ mã nguồn
+
+Bản binary đi kèm được build bằng ESP-IDF **5.5.3 / ESP-Clang 19.1.2**. Xem `firmware/AGENTS.md`, `firmware/docs/custom-board.md` và `firmware/docs/esp-idf-6-migration.md` khi build board khác. Không nạp binary Freenove vào board khác.
+
+Trong ESP-IDF Terminal, chuyển vào `firmware/`, rồi chạy:
 
 ```text
-STARTUP-2026-2027/
-│
-├── FLASH_FIRMWARE.cmd              # Công cụ nạp firmware 1-click thông minh (tự nhận cổng COM)
-├── START_BRIDGE.cmd                # Khởi động nhanh Bridge Server 1-click
-├── flash_firmware.py               # Script Python tự động nạp firmware qua esptool
-│
-├── firmware_bin/                   # Các file binary firmware đã biên dịch sẵn (nạp được ngay)
-│   ├── xiaozhi.bin                 # Bản build mới nhất (Music Player V2, sửa font chữ tiếng Việt)
-│   ├── bootloader.bin              # Bootloader ESP32-S3
-│   ├── partition-table.bin         # Bảng phân vùng Flash 16MB
-│   ├── ota_data_initial.bin        # Dữ liệu phân vùng OTA
-│   └── generated_assets.bin        # Tài nguyên âm thanh & đồ họa nạp vào Flash
-│
-├── bridge/                         # Máy chủ trung gian Bridge Python kết nối Gemini Live
-│   ├── bridge.py                   # Server chính quản lý luồng WebSocket âm thanh & sự kiện
-│   ├── learning_image.py           # Bộ tải, tối ưu ảnh Pillow 320x240 & kiểm duyệt Gemini 2.0
-│   ├── music.py                    # Tìm kiếm & phát nhạc trực tiếp (chuẩn hóa tên bài, font fallback)
-│   ├── guardian_alert.py           # Bộ lọc giám sát an toàn cho bé và gửi email phụ huynh
-│   ├── Promptxiaozhi.md            # Bộ kịch bản tính cách & nghiệp vụ giáo dục chuẩn Wisio
-│   ├── requirements.txt            # Danh sách thư viện Python cần thiết
-│   ├── setup_bridge.cmd            # Script tự động tạo môi trường ảo và cài đặt thư viện
-│   └── start_bridge.cmd            # Khởi động server nhanh
-│
-├── firmware/                       # Toàn bộ mã nguồn Firmware ESP-IDF cho ESP32-S3
-│   ├── main/                       # Logic ứng dụng, âm thanh, hiển thị LCD, Wi-Fi portal
-│   │   ├── overrides/              # Giao diện cấu hình Wi-Fi cute (wifi_configuration.html)
-│   │   ├── display/                # Trình điều khiển màn hình LCD ST7789 & giải mã LVGL/PNG
-│   │   ├── audio/                  # Xử lý âm thanh, micro, I2S và Opus codec
-│   │   └── protocols/              # Giao thức truyền dữ liệu WebSocket 2 chiều
-│   ├── partitions/                 # Bảng phân vùng Flash 8MB / 16MB
-│   ├── scripts/                    # Bộ công cụ build tự động và kiểm thử
-│   ├── CMakeLists.txt              # Cấu hình biên dịch CMake
-│   └── sdkconfig.defaults          # Cấu hình chuẩn ESP-IDF cho bo mạch Freenove 2.8"
-│
-├── HUONG_DAN_SU_DUNG.md            # Sổ tay hướng dẫn chi tiết từ A-Z cho từng thành viên
-└── README.md                       # Tài liệu tổng quan này
+python scripts/build.py freenove-esp32s3-display-2.8-lcd --name freenove-esp32s3-display-2.8-lcd --language vi-VN --wake-word hey-wisio
 ```
 
----
+`hey-wisio` dùng bộ nhận diện tùy biến trên ESP32-S3; chất lượng wake word cần kiểm tra trên robot thực tế. File ứng dụng sau build tên `wisio.bin`. Không đổi tên các package registry hoặc model ESP-SR; xem thông báo bên thứ ba.
 
-## ✨ Các Tính Năng Nổi Bật
+## Giấy phép
 
-### 1. Học Tiếng Anh Trực Quan Với Hình Ảnh Minh Họa 100%
-- Khi bé học từ mới hoặc hỏi nghĩa từ vựng (ví dụ: *con mèo*, *quả táo*, *con chó*, *thanh long*...), robot **chủ động gọi lệnh `show_learning_image`** và hiển thị bức ảnh rõ nét tương ứng ngay trên màn hình LCD 2.8".
-- Ảnh được nén bằng thư viện đồ họa **Pillow (PIL)** với nền xanh đậm `#07152e` đồng bộ thẩm mỹ, dung lượng tối ưu dưới 100 KB giúp nạp tức thì trong vòng 50ms mà không làm nặng vi điều khiển.
-- Kiểm duyệt nội dung nghiêm ngặt bằng **Gemini 2.0 Flash** đảm bảo ảnh an toàn và phù hợp tuyệt đối cho trẻ em.
-
-### 2. Phát Nhạc Thông Minh & Music Player V2 (Đổi Màu Theo Ảnh Bìa)
-- **Chuẩn hóa tên bài hát:** Tự động loại bỏ các tag rác YouTube (`Official MV`, `Audio`, `4K`...), chuẩn hóa tên bài dạng Title Case sạch sẽ.
-- **Sửa triệt để lỗi nuốt chữ:** Ánh xạ thông minh các ký tự có dấu thiếu trong font LCD (`Ơ` -> `O`, `Ư` -> `U`, `Đ` -> `D`...), không còn hiện tượng rớt chữ (như `NI NÀY CÓ ANH`).
-- **Thanh Player tinh tế:** Thiết kế 1 thanh duy nhất sát đáy màn hình; vạch tiến trình tự động biến đổi màu theo ảnh bìa video; hiển thị to rõ thời gian phát `00:16 / 04:28`.
-
-### 3. Giao Diện Cấu Hình Wi-Fi (Captive Portal) "Cute Vibe"
-- Thiết kế bo tròn với bộ font chữ `Quicksand`, `Comfortaa`, `Nunito` thân thiện.
-- Các huy hiệu bước học tập 1, 2, 3 dạng viên kẹo pastel nổi bật.
-- Nút kết nối 3D Claymorphic bóng bẩy, đàn hồi êm ái khi bấm.
-
-### 4. Đàm Thoại Giọng Nói Siêu Tốc (Gemini Live Audio)
-- Độ trễ phản hồi dưới 1 giây qua giao thức WebSocket Bidi Audio.
-- Giọng đọc Zephyr ấm áp, tự nhiên, phát âm tiếng Anh chuẩn bản ngữ và nói tiếng Việt đáng yêu.
-
----
-
-## 🚀 Hướng Dẫn Bắt Đầu Nhanh (Dành Cho Thành Viên Nhóm)
-
-### Bước 1: Nạp Firmware Trong 10 Giây
-1. Cắm cáp USB nối bo mạch Wisio với máy tính.
-2. Chạy file **`FLASH_FIRMWARE.cmd`** tại thư mục gốc.
-3. Chọn cổng COM và chọn chế độ `[1]` để nạp nhanh.
-
-### Bước 2: Cấu Hình Wi-Fi Cho Robot
-1. Bật nguồn robot, dùng điện thoại/laptop kết nối vào Wi-Fi `Wisio-Setup`.
-2. Trình duyệt tự động mở trang cấu hình -> Chọn Wi-Fi gia đình và bấm **Kết Nối Wisio!**.
-
-### Bước 3: Chạy Bridge Server
-1. Chạy file **`START_BRIDGE.cmd`** tại thư mục gốc.
-2. Nhập **Gemini API Key** (lấy miễn phí tại [Google AI Studio](https://aistudio.google.com/app/apikey)).
-3. Bật công tắc Robot Wisio và bắt đầu trò chuyện, học tiếng Anh cùng bé!
-
----
-
-📖 *Để xem hướng dẫn chi tiết từng bước cho phụ huynh và đồng nghiệp, vui lòng xem [HUONG_DAN_SU_DUNG.md](file:///c:/Users/daole/Documents/Codex/2026-09-18/gi-t-i-mu-n-x-2/temp_remote_repo/HUONG_DAN_SU_DUNG.md).*
+Giữ nguyên giấy phép MIT và thông báo bản quyền của nền tảng firmware tại `LICENSE` và `firmware/LICENSE`. Các thư viện đi kèm có giấy phép riêng; xem `THIRD_PARTY_NOTICES.md` và `bridge/licenses/`.

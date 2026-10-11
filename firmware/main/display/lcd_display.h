@@ -30,18 +30,25 @@ protected:
     lv_obj_t* emoji_box_ = nullptr;
     lv_obj_t* chat_message_label_ = nullptr;
     lv_obj_t* music_cover_image_ = nullptr;
+    lv_obj_t* music_placeholder_ = nullptr;
     lv_obj_t* music_top_panel_ = nullptr;
     lv_obj_t* music_bottom_panel_ = nullptr;
     lv_obj_t* music_title_label_ = nullptr;
     lv_obj_t* music_progress_bar_ = nullptr;
     lv_obj_t* music_time_label_ = nullptr;
+    lv_obj_t* charging_overlay_ = nullptr;
+    lv_obj_t* charging_label_ = nullptr;
     uint32_t music_accent_color_ = 0x38BDF8;
+    bool music_active_ = false;
     esp_timer_handle_t preview_timer_ = nullptr;
     std::unique_ptr<LvglImage> preview_image_cached_ = nullptr;
     std::unique_ptr<LvglImage> music_cover_cached_ = nullptr;
     bool hide_subtitle_ = false;  // Control whether to hide chat messages/subtitles
 
     void InitializeLcdThemes();
+    void ShowMusicPlayerLocked(const std::string& title, const std::string& artist,
+                               uint32_t duration_ms);
+    void SetMusicCoverLocked(std::unique_ptr<LvglImage> image);
     virtual bool Lock(int timeout_ms = 0) override;
     virtual void Unlock() override;
 
@@ -60,8 +67,13 @@ public:
     virtual void SetMusicAccentColor(uint32_t color) override;
     virtual void ShowMusicPlayer(const std::string& title, const std::string& artist,
                                  uint32_t duration_ms) override;
+    virtual void ShowMusicPlayerWithCover(const std::string& title, const std::string& artist,
+                                          uint32_t duration_ms, std::unique_ptr<LvglImage> image,
+                                          uint32_t accent_color) override;
     virtual void UpdateMusicProgress(uint32_t position_ms, uint32_t duration_ms) override;
     virtual void HideMusicPlayer() override;
+    virtual void ShowChargingScreen(int battery_level) override;
+    virtual void HideChargingScreen() override;
     virtual void SetupUI() override;
     // Add theme switching function
     virtual void SetTheme(Theme* theme) override;

@@ -12,7 +12,7 @@ protected:
     bool in_config_mode_ = false;
     NetworkEventCallback network_event_callback_ = nullptr;
 
-    virtual const char* GetWifiSsidPrefix() const { return "Xiaozhi"; }
+    virtual const char* GetWifiSsidPrefix() const { return "Wisio"; }
     virtual bool AppendMacToWifiSsid() const { return true; }
     // ESP-IDF units are 0.25 dBm. Zero keeps the configured/default value.
     // Boards with a tight power budget can cap TX before station/AP startup.

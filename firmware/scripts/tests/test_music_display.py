@@ -28,6 +28,11 @@ class MusicDisplayContractTest(unittest.TestCase):
         self.assertIn("FormatMusicTime", source)
         self.assertIn('"%02lu:%02lu"', source)
 
+    def test_music_title_keeps_utf8_vietnamese_spelling(self):
+        source = (ROOT / "main" / "display" / "lcd_display.cc").read_text(encoding="utf-8")
+        self.assertNotIn("SanitizeVietnameseForDisplay", source)
+        self.assertIn("lv_label_set_text(music_title_label_, display_title.c_str())", source)
+
     def test_idle_and_physical_abort_clear_the_music_overlay(self):
         source = (ROOT / "main" / "application.cc").read_text(encoding="utf-8")
         idle_case = source.split("case kDeviceStateIdle:", 1)[1].split(
@@ -40,6 +45,40 @@ class MusicDisplayContractTest(unittest.TestCase):
         self.assertIn("display->HideMusicPlayer()", idle_case)
         self.assertIn("music_playback_token_.clear()", abort_body)
         self.assertIn("HideMusicPlayer()", abort_body)
+
+    def test_bridge_volume_command_is_applied_on_main_task(self):
+        source = (ROOT / "main" / "application.cc").read_text(encoding="utf-8")
+        self.assertIn('strcmp(type->valuestring, "volume") == 0', source)
+        self.assertIn("codec->output_volume()", source)
+        self.assertIn("codec->SetOutputVolume", source)
+        self.assertIn("Schedule([", source)
+
+    def test_lcd_has_full_screen_charging_state(self):
+        header = (ROOT / "main" / "display" / "display.h").read_text(encoding="utf-8")
+        lcd = (ROOT / "main" / "display" / "lcd_display.cc").read_text(encoding="utf-8")
+        board = (ROOT / "main" / "boards" / "freenove-esp32s3-display-2.8-lcd" /
+                 "freenove-esp32s3-display-2.8-lcd.cc").read_text(encoding="utf-8")
+        self.assertIn("ShowChargingScreen", header)
+        self.assertIn('"ĐANG SẠC\\n%d%%"', lcd)
+        self.assertIn("lv_obj_set_width(charging_label_, LV_HOR_RES - 24)", lcd)
+        self.assertIn("OnChargingStatusChanged", board)
+        self.assertIn("SetChargingMode(charging)", board)
+        update = board[board.index("void UpdateChargingScreen("):board.index("void InitializeBatteryMonitor(")]
+        self.assertNotIn("GetBatteryLevel()", update, "Suspend must not wait for an ADC capacity read")
+
+    def test_startup_separates_backlight_and_wifi_current_peaks(self):
+        board = (ROOT / "main" / "boards" / "freenove-esp32s3-display-2.8-lcd" /
+                 "freenove-esp32s3-display-2.8-lcd.cc").read_text(encoding="utf-8")
+        self.assertIn("backlight->SetBrightness(12)", board)
+        self.assertIn("backlight->SetBrightness(45)", board)
+        self.assertIn("GetWifiMaxTxPower() const override { return 52; }", board)
+        self.assertIn("lv_obj_move_foreground(splash_)", board)
+
+    def test_bridge_can_mark_listening_finished_while_processing(self):
+        source = (ROOT / "main" / "application.cc").read_text(encoding="utf-8")
+        self.assertIn('strcmp(type->valuestring, "listen") == 0', source)
+        self.assertIn('strcmp(state->valuestring, "stop") == 0', source)
+        self.assertIn('SetDeviceState(kDeviceStateIdle)', source)
 
 
 if __name__ == "__main__":

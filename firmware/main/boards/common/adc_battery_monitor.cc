@@ -1,8 +1,9 @@
 #include "adc_battery_monitor.h"
 
-AdcBatteryMonitor::AdcBatteryMonitor(adc_unit_t adc_unit, adc_channel_t adc_channel, float upper_resistor, float lower_resistor, gpio_num_t charging_pin)
-    : charging_pin_(charging_pin) {
-    
+AdcBatteryMonitor::AdcBatteryMonitor(adc_unit_t adc_unit, adc_channel_t adc_channel,
+                                     float upper_resistor, float lower_resistor,
+                                     gpio_num_t charging_pin, bool charging_active_low)
+    : charging_pin_(charging_pin), charging_active_low_(charging_active_low) {
     // Initialize charging pin (only if it's not NC)
     if (charging_pin_ != GPIO_NUM_NC) {
         gpio_config_t gpio_cfg = {
@@ -16,22 +17,21 @@ AdcBatteryMonitor::AdcBatteryMonitor(adc_unit_t adc_unit, adc_channel_t adc_chan
     }
 
     // Initialize ADC battery estimation
-    adc_battery_estimation_t adc_cfg = {
-        .internal = {
-            .adc_unit = adc_unit,
-            .adc_bitwidth = ADC_BITWIDTH_DEFAULT,
-            .adc_atten = ADC_ATTEN_DB_12,
-        },
-        .adc_channel = adc_channel,
-        .upper_resistor = upper_resistor,
-        .lower_resistor = lower_resistor
-    };
+    adc_battery_estimation_t adc_cfg = {.internal =
+                                            {
+                                                .adc_unit = adc_unit,
+                                                .adc_bitwidth = ADC_BITWIDTH_DEFAULT,
+                                                .adc_atten = ADC_ATTEN_DB_12,
+                                            },
+                                        .adc_channel = adc_channel,
+                                        .upper_resistor = upper_resistor,
+                                        .lower_resistor = lower_resistor};
 
     // 在ADC配置部分进行条件设置
     if (charging_pin_ != GPIO_NUM_NC) {
-        adc_cfg.charging_detect_cb = [](void *user_data) -> bool {
-            AdcBatteryMonitor *self = (AdcBatteryMonitor *)user_data;
-            return gpio_get_level(self->charging_pin_) == 1;
+        adc_cfg.charging_detect_cb = [](void* user_data) -> bool {
+            AdcBatteryMonitor* self = (AdcBatteryMonitor*)user_data;
+            return self->is_charging_.load();
         };
         adc_cfg.charging_detect_user_data = this;
     } else {
@@ -43,15 +43,17 @@ AdcBatteryMonitor::AdcBatteryMonitor(adc_unit_t adc_unit, adc_channel_t adc_chan
 
     // Initialize timer
     esp_timer_create_args_t timer_cfg = {
-        .callback = [](void *arg) {
-            AdcBatteryMonitor *self = (AdcBatteryMonitor *)arg;
-            self->CheckBatteryStatus();
-        },
+        .callback =
+            [](void* arg) {
+                AdcBatteryMonitor* self = (AdcBatteryMonitor*)arg;
+                self->CheckBatteryStatus();
+            },
         .arg = this,
         .name = "adc_battery_monitor",
     };
     ESP_ERROR_CHECK(esp_timer_create(&timer_cfg, &timer_handle_));
-    ESP_ERROR_CHECK(esp_timer_start_periodic(timer_handle_, 1000000));
+    ESP_ERROR_CHECK(
+        esp_timer_start_periodic(timer_handle_, HasChargingStatusSignal() ? 100000 : 1000000));
 }
 
 AdcBatteryMonitor::~AdcBatteryMonitor() {
@@ -66,15 +68,20 @@ AdcBatteryMonitor::~AdcBatteryMonitor() {
 }
 
 bool AdcBatteryMonitor::IsCharging() {
+    // GPIO-based status and callbacks must observe the same debounced state.
+    if (HasChargingStatusSignal()) {
+        return is_charging_.load();
+    }
     // 优先使用adc_battery_estimation库的功能
     if (adc_battery_estimation_handle_ != nullptr) {
         bool is_charging = false;
-        esp_err_t err = adc_battery_estimation_get_charging_state(adc_battery_estimation_handle_, &is_charging);
+        esp_err_t err =
+            adc_battery_estimation_get_charging_state(adc_battery_estimation_handle_, &is_charging);
         if (err == ESP_OK) {
             return is_charging;
         }
     }
-    
+
     // 回退到GPIO读取或返回默认值
     if (charging_pin_ != GPIO_NUM_NC) {
         return gpio_get_level(charging_pin_) == 1;
@@ -106,11 +113,14 @@ void AdcBatteryMonitor::OnChargingStatusChanged(std::function<void(bool)> callba
 }
 
 void AdcBatteryMonitor::CheckBatteryStatus() {
-    bool new_charging_status = IsCharging();
-    if (new_charging_status != is_charging_) {
-        is_charging_ = new_charging_status;
+    const bool new_charging_status =
+        HasChargingStatusSignal()
+            ? charging_filter_.UpdateLevel(gpio_get_level(charging_pin_) == 1, charging_active_low_,
+                                           esp_timer_get_time())
+            : IsCharging();
+    if (is_charging_.exchange(new_charging_status) != new_charging_status) {
         if (on_charging_status_changed_) {
-            on_charging_status_changed_(is_charging_);
+            on_charging_status_changed_(new_charging_status);
         }
     }
 }

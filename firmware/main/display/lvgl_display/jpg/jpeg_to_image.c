@@ -8,13 +8,13 @@
 
 #include "jpeg_to_image.h"
 
-#ifdef CONFIG_XIAOZHI_ENABLE_CAMERA_DEBUG_MODE
+#ifdef CONFIG_WISIO_ENABLE_CAMERA_DEBUG_MODE
 #undef LOG_LOCAL_LEVEL
 #define LOG_LOCAL_LEVEL MAX(CONFIG_LOG_DEFAULT_LEVEL, ESP_LOG_DEBUG)
-#endif  // CONFIG_XIAOZHI_ENABLE_CAMERA_DEBUG_MODE
+#endif  // CONFIG_WISIO_ENABLE_CAMERA_DEBUG_MODE
 #include <esp_log.h>
 
-#ifdef CONFIG_XIAOZHI_ENABLE_HARDWARE_JPEG_DECODER
+#ifdef CONFIG_WISIO_ENABLE_HARDWARE_JPEG_DECODER
 #include "driver/jpeg_decode.h"
 #endif
 
@@ -99,7 +99,7 @@ jpeg_dec_failed:
     return ret;
 }
 
-#ifdef CONFIG_XIAOZHI_ENABLE_HARDWARE_JPEG_DECODER
+#ifdef CONFIG_WISIO_ENABLE_HARDWARE_JPEG_DECODER
 static esp_err_t decode_with_hardware_jpeg(const uint8_t* src, size_t src_len, uint8_t** out, size_t* out_len,
                                            size_t* width, size_t* height, size_t* stride) {
     ESP_LOGD(TAG, "Decoding JPEG with hardware decoder");
@@ -240,19 +240,19 @@ jpeg_hw_dec_failed:
     *stride = 0;
     return ret;
 }
-#endif  // CONFIG_XIAOZHI_ENABLE_HARDWARE_JPEG_DECODER
+#endif  // CONFIG_WISIO_ENABLE_HARDWARE_JPEG_DECODER
 
 esp_err_t jpeg_to_image(const uint8_t* src, size_t src_len, uint8_t** out, size_t* out_len, size_t* width,
                         size_t* height, size_t* stride) {
-#ifdef CONFIG_XIAOZHI_ENABLE_CAMERA_DEBUG_MODE
+#ifdef CONFIG_WISIO_ENABLE_CAMERA_DEBUG_MODE
     esp_log_level_set(TAG, ESP_LOG_DEBUG);
-#endif  // CONFIG_XIAOZHI_ENABLE_CAMERA_DEBUG_MODE
+#endif  // CONFIG_WISIO_ENABLE_CAMERA_DEBUG_MODE
     if (src == NULL || src_len == 0 || out == NULL || out_len == NULL || width == NULL || height == NULL ||
         stride == NULL) {
         ESP_LOGE(TAG, "Invalid parameters");
         return ESP_ERR_INVALID_ARG;
     }
-#ifdef CONFIG_XIAOZHI_ENABLE_HARDWARE_JPEG_DECODER
+#ifdef CONFIG_WISIO_ENABLE_HARDWARE_JPEG_DECODER
     esp_err_t ret = decode_with_hardware_jpeg(src, src_len, out, out_len, width, height, stride);
     if (ret == ESP_OK) {
         return ret;

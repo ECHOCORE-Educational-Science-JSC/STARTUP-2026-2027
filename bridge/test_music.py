@@ -10,35 +10,52 @@ import music
 
 
 class MusicSearchTest(unittest.TestCase):
+    @staticmethod
+    def response(data):
+        class Response:
+            def __enter__(self): return self
+            def __exit__(self, *_): pass
+            def read(self): return json.dumps({"data": data}).encode()
+        return Response()
+
+    def test_unavailable_audius_result_is_skipped(self):
+        data = [None, {"id": "gated", "title": "Nơi Này Có Anh",
+                       "user": {"name": "Sơn Tùng M-TP"}, "is_stream_gated": True},
+                {"id": "working", "title": "Nơi Này Có Anh",
+                 "user": {"name": "Sơn Tùng M-TP"}, "duration": 260}]
+        with patch("music.urlopen", return_value=self.response(data)):
+            track = music.search_track("Nơi Này Có Anh Sơn Tùng M-TP")
+        self.assertEqual(track.id, "working")
+        self.assertEqual(track.stream_url, "https://api.audius.co/v1/tracks/working/stream")
+
     def test_bundled_music_runtime_is_ready(self):
         self.assertIsNone(bridge.music_setup_problem())
 
     def test_picks_requested_title_and_artist_over_unrelated_result(self):
-        payload = {"entries": [
-            {"id": "a", "title": "Random Song", "uploader": "Someone", "url": "https://a"},
-            {"id": "b", "title": "Blue Sky", "artist": "Luna", "url": "https://b"},
-        ]}
-        class FakeYDL:
-            def __init__(self, _): pass
-            def __enter__(self): return self
-            def __exit__(self, *_): pass
-            def extract_info(self, *_args, **_kwargs): return payload
-        with patch("yt_dlp.YoutubeDL", FakeYDL):
+        data = [
+            {"id": "a", "title": "Random Song", "user": {"name": "Someone"}},
+            {"id": "b", "title": "Blue Sky", "user": {"name": "Luna"}},
+        ]
+        with patch("music.urlopen", return_value=self.response(data)):
             track = music.search_track("Blue Sky Luna")
         self.assertEqual(track.id, "b")
-        self.assertEqual(track.stream_url, "https://b")
+        self.assertEqual(track.stream_url, "https://api.audius.co/v1/tracks/b/stream")
+
+    def test_excluded_failed_result_selects_next_matching_stream(self):
+        data = [
+            {"id": "dead", "title": "Blue Sky", "user": {"name": "Luna"}},
+            {"id": "working", "title": "Blue Sky", "user": {"name": "Luna"}},
+        ]
+        with patch("music.urlopen", return_value=self.response(data)):
+            track = music.search_track("Blue Sky Luna", {"dead"})
+        self.assertEqual(track.id, "working")
+        self.assertEqual(track.stream_url, "https://api.audius.co/v1/tracks/working/stream")
 
     def test_does_not_claim_wrong_song(self):
-        payload = {"entries": [
-            {"id": "b", "title": "Random Song", "uploader": "Someone", "url": "https://b"},
-        ]}
-        class FakeYDL:
-            def __init__(self, _): pass
-            def __enter__(self): return self
-            def __exit__(self, *_): pass
-            def extract_info(self, *_args, **_kwargs): return payload
-        with patch("yt_dlp.YoutubeDL", FakeYDL):
-            with self.assertRaisesRegex(music.MusicError, "Không tìm thấy bài phù hợp"):
+        data = [{"id": "b", "title": "Random Song", "user": {"name": "Someone"}}]
+        with patch("music.urlopen", return_value=self.response(data)), \
+             patch("music._search_youtube_track", return_value=None):
+            with self.assertRaisesRegex(music.MusicError, "chưa có bài phù hợp"):
                 music.search_track("Blue Sky Luna")
 
     def test_clean_track_title_removes_clickbait_and_noisy_tags(self):
@@ -53,8 +70,149 @@ class MusicSearchTest(unittest.TestCase):
             cleaned = music.clean_track_title(raw)
             self.assertEqual(cleaned, expected)
 
+    def test_vietnamese_title_keeps_exact_spelling_for_display(self):
+        data = [{"id": "vn", "title": "Đừng Làm Trái Tim Anh Đau",
+                 "user": {"name": "Sơn Tùng M-TP"}}]
+        with patch("music.urlopen", return_value=self.response(data)):
+            track = music.search_track("Đừng Làm Trái Tim Anh Đau Sơn Tùng")
+        self.assertEqual(track.display_title, "Đừng Làm Trái Tim Anh Đau")
+        self.assertEqual(track.display_artist, "Sơn Tùng M-TP")
+
 
 class MusicVoiceTest(unittest.IsolatedAsyncioTestCase):
+    async def test_play_song_clears_stale_learning_visual(self):
+        class Music:
+            async def prepare(self, _query):
+                return music.Track("vn", "Nơi Này Có Anh", "Sơn Tùng M-TP")
+            async def schedule_pending(self): pass
+            async def defer_for_speech(self): pass
+            def is_playing(self): return False
+            def is_active(self): return False
+        class Gemini:
+            def __init__(self): self.sent = []
+            def __aiter__(self):
+                async def events():
+                    yield json.dumps({"toolCall": {"functionCalls": [{
+                        "id": "song", "name": "play_song",
+                        "args": {"query": "Nơi Này Có Anh"},
+                    }]}})
+                    yield json.dumps({"serverContent": {
+                        "outputTranscription": {"text": "Wisio tìm thấy bài Nơi Này Có Anh rồi nè!"},
+                        "modelTurn": {"parts": [{"inlineData": {"data": "AAAA"}}]},
+                        "turnComplete": True,
+                    }})
+                return events()
+            async def send(self, value): self.sent.append(json.loads(value))
+        class Device:
+            async def send(self, _value): pass
+        class Codec:
+            def encode(self, _encoder, _pcm): return b"opus"
+
+        visual = bridge.learning_session.LearningVisualState()
+        visual.turn_word = "bee"
+        visual.turn_query = "bee"
+        visual.visual_required = True
+        visual.correction_sent = True
+        with patch.object(bridge, "deliver_learning_image") as deliver:
+            await bridge.gemini_output(
+                Gemini(), Device(), None, Codec(), "session", 1,
+                {"gemini_content_seen": False, "output_frames": 0},
+                bridge.new_speech_state(), one_turn=True, music_controller=Music(),
+                learning_visual_state=visual,
+            )
+        deliver.assert_not_called()
+        self.assertIsNone(visual.turn_word)
+
+    async def test_silent_tool_turn_requests_confirmation_before_music_starts(self):
+        class Music:
+            def __init__(self): self.pending = None; self.started = False
+            async def prepare(self, _query):
+                self.pending = music.Track("vn", "Cháu Yêu Bà", "Xuân Mai")
+                return self.pending
+            async def schedule_pending(self): self.started = True
+            async def defer_for_speech(self): pass
+            def is_playing(self): return False
+            def is_active(self): return self.pending is not None
+        controller = Music()
+        class Gemini:
+            def __init__(self): self.sent = []
+            def __aiter__(self):
+                async def events():
+                    yield json.dumps({"toolCall": {"functionCalls": [{
+                        "id": "song", "name": "play_song", "args": {"query": "Cháu Yêu Bà"},
+                    }]}})
+                    yield json.dumps({"serverContent": {"turnComplete": True}})
+                    self.started_after_silent_turn = controller.started
+                    yield json.dumps({"serverContent": {
+                        "outputTranscription": {"text": "Wisio tìm thấy bài Cháu Yêu Bà rồi nè!"},
+                        "modelTurn": {"parts": [{"inlineData": {"data": "AAAA"}}]},
+                    }})
+                    yield json.dumps({"serverContent": {"turnComplete": True}})
+                return events()
+            async def send(self, value): self.sent.append(json.loads(value))
+        class Device:
+            async def send(self, _value): pass
+        class Codec:
+            def encode(self, _encoder, _pcm): return b"opus"
+        gemini = Gemini()
+        await bridge.gemini_output(
+            gemini, Device(), None, Codec(), "session", 1,
+            {"gemini_content_seen": False, "output_frames": 0},
+            bridge.new_speech_state(), one_turn=True, music_controller=controller,
+        )
+        self.assertFalse(gemini.started_after_silent_turn)
+        self.assertTrue(controller.started)
+        retry_prompts = [message for message in gemini.sent if "clientContent" in message]
+        self.assertEqual(len(retry_prompts), 1)
+
+    async def test_voice_volume_tool_sends_device_command(self):
+        class Gemini:
+            def __init__(self): self.sent = []
+            def __aiter__(self):
+                async def events():
+                    yield json.dumps({"toolCall": {"functionCalls": [{
+                        "id": "vol", "name": "adjust_volume", "args": {"action": "up"},
+                    }]}})
+                    yield json.dumps({"serverContent": {"turnComplete": True}})
+                return events()
+            async def send(self, value): self.sent.append(json.loads(value))
+        class Device:
+            def __init__(self): self.sent = []
+            async def send(self, value): self.sent.append(json.loads(value))
+        class Music:
+            def is_playing(self): return False
+            def is_active(self): return False
+            async def schedule_pending(self): pass
+        gemini, device = Gemini(), Device()
+        await bridge.gemini_output(
+            gemini, device, None, None, "session", 1,
+            {"gemini_content_seen": False}, bridge.new_speech_state(), one_turn=True,
+            music_controller=Music(),
+        )
+        self.assertEqual(device.sent[0], {
+            "type": "volume", "action": "up", "session_id": "session", "step": 10,
+        })
+        response = gemini.sent[0]["toolResponse"]["functionResponses"][0]["response"]
+        self.assertIn("updated", response["result"])
+
+    async def test_failed_stream_is_reconnected_once_before_reporting_failure(self):
+        class Device:
+            async def send(self, _value): pass
+        old = music.Track("x", "X", "Y", "old", "https://watch/x")
+        fresh = music.Track("x", "X", "Y", "fresh", "https://watch/x")
+        async def frames(track, frame_bytes):
+            if track.stream_url == "old":
+                raise music.MusicError("expired")
+            yield b"x" * frame_bytes
+        controller = bridge.MusicController(Device(), None, None, "s", 1, {})
+        with patch.object(music, "search_track", return_value=old), \
+             patch.object(music, "refresh_track_stream", return_value=fresh) as refresh, \
+             patch.object(music, "pcm_frames", side_effect=frames):
+            found = await controller.prepare("X")
+        self.assertEqual(found.stream_url, "fresh")
+        refresh.assert_called_once_with(old)
+        await controller.stop()
+
     async def test_search_does_not_claim_music_started_before_playback(self):
         class Device:
             def __init__(self):
@@ -234,7 +392,7 @@ class MusicVoiceTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(states[0], "start")
         self.assertEqual(states[-1], "stop")
 
-    async def test_cover_event_includes_accent_color(self):
+    async def test_music_start_includes_cover_accent_color(self):
         class Device:
             def __init__(self): self.sent = []
             async def send(self, value): self.sent.append(value)
@@ -257,7 +415,7 @@ class MusicVoiceTest(unittest.IsolatedAsyncioTestCase):
                 await controller.task
             if controller.cover_task is not None:
                 await controller.cover_task
-        cover_events = [json.loads(v) for v in device.sent if isinstance(v, str) and json.loads(v).get("state") == "cover"]
+        cover_events = [json.loads(v) for v in device.sent if isinstance(v, str) and json.loads(v).get("state") == "start"]
         self.assertEqual(len(cover_events), 1)
         self.assertEqual(cover_events[0]["accent_color"], "#FF5722")
 
@@ -327,6 +485,39 @@ class MusicVoiceTest(unittest.IsolatedAsyncioTestCase):
                 await controller.task
         self.assertEqual(len(failures), 1)
         self.assertFalse(controller.is_active())
+
+    async def test_listen_reassert_during_end_callback_does_not_restart_finished_music(self):
+        class Device:
+            def __init__(self):
+                self.sent = []
+            async def send(self, value):
+                self.sent.append(value)
+        class Codec:
+            def encode(self, _encoder, _frame):
+                return b'opus'
+        async def frames(_track, frame_bytes):
+            yield bytes(frame_bytes)
+        callback_started, callback_release = asyncio.Event(), asyncio.Event()
+        async def ended(_track):
+            callback_started.set()
+            await callback_release.wait()
+        device = Device()
+        controller = bridge.MusicController(device, None, Codec(), 'session', 1, {'output_frames': 0})
+        controller.pending = music.Track('song', 'Song', 'Artist')
+        controller.on_natural_end = ended
+        with patch.object(music, 'pcm_frames', side_effect=frames):
+            await controller.start_pending()
+            task = controller.task
+            try:
+                await asyncio.wait_for(callback_started.wait(), 2)
+                await controller.reassert_playing()
+                states = [json.loads(value)['state'] for value in device.sent
+                          if isinstance(value, str) and json.loads(value).get('type') == 'music']
+                self.assertEqual(states[-1], 'stop')
+                self.assertEqual(states.count('start'), 1)
+            finally:
+                callback_release.set()
+                await asyncio.wait_for(task, 2)
 
     async def test_play_song_confirmation_finishes_before_music_starts(self):
         class Gemini:

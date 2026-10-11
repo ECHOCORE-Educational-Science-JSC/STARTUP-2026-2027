@@ -122,6 +122,10 @@ void SingleLed::OnBlinkTimer() {
 
 void SingleLed::OnStateChanged() {
     auto& app = Application::GetInstance();
+    if (app.IsChargingMode()) {
+        TurnOff();
+        return;
+    }
     auto device_state = app.GetDeviceState();
     switch (device_state) {
         case kDeviceStateStarting:

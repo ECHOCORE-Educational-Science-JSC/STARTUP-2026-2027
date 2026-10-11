@@ -2,8 +2,10 @@
 #define PROTOCOL_H
 
 #include <cJSON.h>
+#include <atomic>
 #include <chrono>
 #include <functional>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -47,6 +49,7 @@ public:
     inline int server_sample_rate() const { return server_sample_rate_; }
     inline int server_frame_duration() const { return server_frame_duration_; }
     inline const std::string& session_id() const { return session_id_; }
+    bool TakeServerGreetingPending() { return server_greeting_pending_.exchange(false); }
 
     void OnIncomingAudio(std::function<void(std::unique_ptr<AudioStreamPacket> packet)> callback);
     void OnIncomingJson(std::function<void(const cJSON* root)> callback);
@@ -80,12 +83,17 @@ protected:
     int server_frame_duration_ = 60;
     bool error_occurred_ = false;
     std::string session_id_;
+    std::atomic<bool> server_greeting_pending_{false};
     std::chrono::time_point<std::chrono::steady_clock> last_incoming_time_;
 
     virtual bool SendText(const std::string& text) = 0;
     virtual void SetError(const std::string& message);
     virtual bool IsTimeout() const;
     static void AddTextFontCapabilities(cJSON* root);
+    void ResetServerGreeting() { server_greeting_pending_ = false; }
+    void ParseServerGreeting(const cJSON* root) {
+        server_greeting_pending_ = cJSON_IsTrue(cJSON_GetObjectItem(root, "greeting_pending"));
+    }
 };
 
 #endif  // PROTOCOL_H

@@ -94,7 +94,7 @@ idf.py menuconfig
 选择板卡：
 
 ```text
-Xiaozhi Assistant -> Board Type -> M5Stack StopWatch
+Wisio Assistant -> Board Type -> M5Stack StopWatch
 ```
 
 配置 Flash 大小：
@@ -120,7 +120,7 @@ Component config -> ESP PSRAM -> SPI RAM config -> Set RAM clock speed -> 80MHz 
 配置唤醒词实现方式：
 
 ```text
-Xiaozhi Assistant -> Wake Word Implementation Type -> Wakenet model with AFE
+Wisio Assistant -> Wake Word Implementation Type -> Wakenet model with AFE
 ```
 
 编译：
@@ -141,13 +141,13 @@ esptool.py --chip esp32s3 merge_bin \
     0x0 build/bootloader/bootloader.bin \
     0x8000 build/partition_table/partition-table.bin \
     0xd000 build/ota_data_initial.bin \
-    0x20000 build/xiaozhi.bin \
+    0x20000 build/wisio.bin \
     0x800000 build/generated_assets.bin \
-    -o M5Stack-StopWatch-XiaoZhi-v2.2.6_0x00.bin
+    -o M5Stack-StopWatch-Wisio-v2.2.6_0x00.bin
 ```
 
 烧录合并后的固件：
 
 ```bash
-esptool.py -b 1500000 write_flash -z 0 M5Stack-StopWatch-XiaoZhi-v2.2.6_0x00.bin
+esptool.py -b 1500000 write_flash -z 0 M5Stack-StopWatch-Wisio-v2.2.6_0x00.bin
 ```

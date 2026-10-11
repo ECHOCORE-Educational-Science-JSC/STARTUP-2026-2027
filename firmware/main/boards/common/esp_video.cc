@@ -25,55 +25,55 @@
 #include "mcp_server.h"
 #include "system_info.h"
 
-#ifdef CONFIG_XIAOZHI_ENABLE_CAMERA_DEBUG_MODE
+#ifdef CONFIG_WISIO_ENABLE_CAMERA_DEBUG_MODE
 #undef LOG_LOCAL_LEVEL
 #define LOG_LOCAL_LEVEL MAX(CONFIG_LOG_DEFAULT_LEVEL, ESP_LOG_DEBUG)
-#endif  // CONFIG_XIAOZHI_ENABLE_CAMERA_DEBUG_MODE
+#endif  // CONFIG_WISIO_ENABLE_CAMERA_DEBUG_MODE
 #include <esp_log.h> // should be after LOCAL_LOG_LEVEL definition
 
-#ifdef CONFIG_XIAOZHI_ENABLE_ROTATE_CAMERA_IMAGE
+#ifdef CONFIG_WISIO_ENABLE_ROTATE_CAMERA_IMAGE
 #ifdef CONFIG_IDF_TARGET_ESP32P4
 #include "driver/ppa.h"
-#if defined(CONFIG_XIAOZHI_CAMERA_IMAGE_ROTATION_ANGLE_90)
+#if defined(CONFIG_WISIO_CAMERA_IMAGE_ROTATION_ANGLE_90)
 #define IMAGE_ROTATION_ANGLE (PPA_SRM_ROTATION_ANGLE_270)
-#elif defined(CONFIG_XIAOZHI_CAMERA_IMAGE_ROTATION_ANGLE_270)
+#elif defined(CONFIG_WISIO_CAMERA_IMAGE_ROTATION_ANGLE_270)
 #define IMAGE_ROTATION_ANGLE (PPA_SRM_ROTATION_ANGLE_90)
 #else
-#error "CONFIG_XIAOZHI_CAMERA_IMAGE_ROTATION_ANGLE is not set"
+#error "CONFIG_WISIO_CAMERA_IMAGE_ROTATION_ANGLE is not set"
 #endif  // angle
 #else   // target
 #include "esp_imgfx_rotate.h"
-#if defined(CONFIG_XIAOZHI_CAMERA_IMAGE_ROTATION_ANGLE_90)
+#if defined(CONFIG_WISIO_CAMERA_IMAGE_ROTATION_ANGLE_90)
 #define IMAGE_ROTATION_ANGLE (90)
-#elif defined(CONFIG_XIAOZHI_CAMERA_IMAGE_ROTATION_ANGLE_270)
+#elif defined(CONFIG_WISIO_CAMERA_IMAGE_ROTATION_ANGLE_270)
 #define IMAGE_ROTATION_ANGLE (270)
 #else
-#error "CONFIG_XIAOZHI_CAMERA_IMAGE_ROTATION_ANGLE is not set"
+#error "CONFIG_WISIO_CAMERA_IMAGE_ROTATION_ANGLE is not set"
 #endif  // angle
 #endif  // target
-#endif  // CONFIG_XIAOZHI_ENABLE_ROTATE_CAMERA_IMAGE
+#endif  // CONFIG_WISIO_ENABLE_ROTATE_CAMERA_IMAGE
 
 
 #define TAG "EspVideo"
 
-#if CONFIG_XIAOZHI_CAMERA_MIRROR_CONFIGURED
-#if CONFIG_XIAOZHI_CAMERA_HMIRROR
+#if CONFIG_WISIO_CAMERA_MIRROR_CONFIGURED
+#if CONFIG_WISIO_CAMERA_HMIRROR
 static constexpr bool kConfiguredHMirror = true;
 #else
 static constexpr bool kConfiguredHMirror = false;
 #endif
-#if CONFIG_XIAOZHI_CAMERA_VFLIP
+#if CONFIG_WISIO_CAMERA_VFLIP
 static constexpr bool kConfiguredVFlip = true;
 #else
 static constexpr bool kConfiguredVFlip = false;
 #endif
 #endif
 
-#if defined(CONFIG_CAMERA_SENSOR_SWAP_PIXEL_BYTE_ORDER) || defined(CONFIG_XIAOZHI_ENABLE_CAMERA_ENDIANNESS_SWAP)
-#pragma message("CAMERA_SENSOR_SWAP_PIXEL_BYTE_ORDER or CONFIG_XIAOZHI_ENABLE_CAMERA_ENDIANNESS_SWAP is enabled; verify YUV422 image integrity")
+#if defined(CONFIG_CAMERA_SENSOR_SWAP_PIXEL_BYTE_ORDER) || defined(CONFIG_WISIO_ENABLE_CAMERA_ENDIANNESS_SWAP)
+#pragma message("CAMERA_SENSOR_SWAP_PIXEL_BYTE_ORDER or CONFIG_WISIO_ENABLE_CAMERA_ENDIANNESS_SWAP is enabled; verify YUV422 image integrity")
 #endif
 
-#if CONFIG_XIAOZHI_ENABLE_CAMERA_DEBUG_MODE
+#if CONFIG_WISIO_ENABLE_CAMERA_DEBUG_MODE
 #define CAM_PRINT_FOURCC(pixelformat)       \
     char fourcc[5];                         \
     fourcc[0] = pixelformat & 0xFF;         \
@@ -106,7 +106,7 @@ static void log_available_video_devices() {
 }
 #else
 #define CAM_PRINT_FOURCC(pixelformat) (void)0;
-#endif  // CONFIG_XIAOZHI_ENABLE_CAMERA_DEBUG_MODE
+#endif  // CONFIG_WISIO_ENABLE_CAMERA_DEBUG_MODE
 
 EspVideo::EspVideo(const esp_video_init_config_t& config) {
     if (esp_video_init(&config) != ESP_OK) {
@@ -114,9 +114,9 @@ EspVideo::EspVideo(const esp_video_init_config_t& config) {
         return;
     }
 
-#ifdef CONFIG_XIAOZHI_ENABLE_CAMERA_DEBUG_MODE
+#ifdef CONFIG_WISIO_ENABLE_CAMERA_DEBUG_MODE
     esp_log_level_set(TAG, ESP_LOG_DEBUG);
-#endif  // CONFIG_XIAOZHI_ENABLE_CAMERA_DEBUG_MODE
+#endif  // CONFIG_WISIO_ENABLE_CAMERA_DEBUG_MODE
 
     const char* video_device_name = nullptr;
 
@@ -157,9 +157,9 @@ EspVideo::EspVideo(const esp_video_init_config_t& config) {
 
     if (video_fd_ < 0) {
         ESP_LOGE(TAG, "open %s failed, errno=%d(%s)", video_device_name, errno, strerror(errno));
-#if CONFIG_XIAOZHI_ENABLE_CAMERA_DEBUG_MODE
+#if CONFIG_WISIO_ENABLE_CAMERA_DEBUG_MODE
         log_available_video_devices();
-#endif  // CONFIG_XIAOZHI_ENABLE_CAMERA_DEBUG_MODE
+#endif  // CONFIG_WISIO_ENABLE_CAMERA_DEBUG_MODE
         return;
     }
 
@@ -190,10 +190,10 @@ EspVideo::EspVideo(const esp_video_init_config_t& config) {
 
     struct v4l2_format setformat = {};
     setformat.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-#ifdef CONFIG_XIAOZHI_ENABLE_ROTATE_CAMERA_IMAGE
+#ifdef CONFIG_WISIO_ENABLE_ROTATE_CAMERA_IMAGE
     sensor_width_ = format.fmt.pix.width;
     sensor_height_ = format.fmt.pix.height;
-#endif  // CONFIG_XIAOZHI_ENABLE_ROTATE_CAMERA_IMAGE
+#endif  // CONFIG_WISIO_ENABLE_ROTATE_CAMERA_IMAGE
     setformat.fmt.pix.width = format.fmt.pix.width;
     setformat.fmt.pix.height = format.fmt.pix.height;
 
@@ -205,17 +205,17 @@ EspVideo::EspVideo(const esp_video_init_config_t& config) {
 
     // esp_video 2.x uses the packed YUYV/UYVY FOURCC values. Keep YUV422P
     // for compatibility with esp_video 1.x, where it was used for YUYV data.
-#if defined(CONFIG_XIAOZHI_ENABLE_ROTATE_CAMERA_IMAGE) && defined(CONFIG_SOC_PPA_SUPPORTED)
+#if defined(CONFIG_WISIO_ENABLE_ROTATE_CAMERA_IMAGE) && defined(CONFIG_SOC_PPA_SUPPORTED)
     auto get_rank = [](uint32_t fmt) -> int {
         switch (fmt) {
             case V4L2_PIX_FMT_RGB24:
                 return 0;
             case V4L2_PIX_FMT_RGB565:
                 return 1;
-#ifdef CONFIG_XIAOZHI_ENABLE_HARDWARE_JPEG_ENCODER
+#ifdef CONFIG_WISIO_ENABLE_HARDWARE_JPEG_ENCODER
             case V4L2_PIX_FMT_YUV420:  // 软件 JPEG 编码器不支持 YUV420 格式
                 return 2;
-#endif  // CONFIG_XIAOZHI_ENABLE_HARDWARE_JPEG_ENCODER
+#endif  // CONFIG_WISIO_ENABLE_HARDWARE_JPEG_ENCODER
             case V4L2_PIX_FMT_YUYV:
             case V4L2_PIX_FMT_UYVY:
                 return 3;
@@ -236,14 +236,14 @@ EspVideo::EspVideo(const esp_video_init_config_t& config) {
                 return 11;
             case V4L2_PIX_FMT_RGB24:
                 return 12;
-#ifdef CONFIG_XIAOZHI_ENABLE_HARDWARE_JPEG_ENCODER
+#ifdef CONFIG_WISIO_ENABLE_HARDWARE_JPEG_ENCODER
             case V4L2_PIX_FMT_YUV420:
                 return 13;
-#endif  // CONFIG_XIAOZHI_ENABLE_HARDWARE_JPEG_ENCODER
-#ifdef CONFIG_XIAOZHI_CAMERA_ALLOW_JPEG_INPUT
+#endif  // CONFIG_WISIO_ENABLE_HARDWARE_JPEG_ENCODER
+#ifdef CONFIG_WISIO_CAMERA_ALLOW_JPEG_INPUT
             case V4L2_PIX_FMT_JPEG:
                 return 5;
-#endif  // CONFIG_XIAOZHI_CAMERA_ALLOW_JPEG_INPUT
+#endif  // CONFIG_WISIO_CAMERA_ALLOW_JPEG_INPUT
             case V4L2_PIX_FMT_GREY:
                 return 20;
             default:
@@ -284,12 +284,12 @@ EspVideo::EspVideo(const esp_video_init_config_t& config) {
         return;
     }
 
-#if CONFIG_XIAOZHI_CAMERA_MIRROR_CONFIGURED
+#if CONFIG_WISIO_CAMERA_MIRROR_CONFIGURED
     SetHMirror(kConfiguredHMirror);
     SetVFlip(kConfiguredVFlip);
 #endif
 
-#ifdef CONFIG_XIAOZHI_ENABLE_ROTATE_CAMERA_IMAGE
+#ifdef CONFIG_WISIO_ENABLE_ROTATE_CAMERA_IMAGE
     frame_.width = setformat.fmt.pix.height;
     frame_.height = setformat.fmt.pix.width;
 #else
@@ -442,13 +442,13 @@ bool EspVideo::Capture() {
                 return false;
             }
 
-#ifdef CONFIG_XIAOZHI_ENABLE_ROTATE_CAMERA_IMAGE
+#ifdef CONFIG_WISIO_ENABLE_ROTATE_CAMERA_IMAGE
             ESP_LOGW(TAG, "mmap_buffers_[buf.index].length = %d, sensor_width = %d, sensor_height = %d",
                      mmap_buffers_[buf.index].length, sensor_width_, sensor_height_);
 #else
             ESP_LOGW(TAG, "mmap_buffers_[buf.index].length = %d, frame.width = %d, frame.height = %d",
                      mmap_buffers_[buf.index].length, frame_.width, frame_.height);
-#endif  // CONFIG_XIAOZHI_ENABLE_ROTATE_CAMERA_IMAGE
+#endif  // CONFIG_WISIO_ENABLE_ROTATE_CAMERA_IMAGE
             ESP_LOG_BUFFER_HEXDUMP(TAG, mmap_buffers_[buf.index].start, MIN(mmap_buffers_[buf.index].length, 256),
                                    ESP_LOG_DEBUG);
 
@@ -459,10 +459,10 @@ bool EspVideo::Capture() {
                 case V4L2_PIX_FMT_UYVY:
                 case V4L2_PIX_FMT_YUV420:
                 case V4L2_PIX_FMT_GREY:
-#ifdef CONFIG_XIAOZHI_CAMERA_ALLOW_JPEG_INPUT
+#ifdef CONFIG_WISIO_CAMERA_ALLOW_JPEG_INPUT
                 case V4L2_PIX_FMT_JPEG:
-#endif  // CONFIG_XIAOZHI_CAMERA_ALLOW_JPEG_INPUT
-#ifdef CONFIG_XIAOZHI_ENABLE_CAMERA_ENDIANNESS_SWAP
+#endif  // CONFIG_WISIO_CAMERA_ALLOW_JPEG_INPUT
+#ifdef CONFIG_WISIO_ENABLE_CAMERA_ENDIANNESS_SWAP
                 {
                     auto src16 = (uint16_t*)mmap_buffers_[buf.index].start;
                     auto dst16 = (uint16_t*)frame_.data;
@@ -474,13 +474,13 @@ bool EspVideo::Capture() {
 #else
                     memcpy(frame_.data, mmap_buffers_[buf.index].start,
                            MIN(mmap_buffers_[buf.index].length, frame_.len));
-#endif  // CONFIG_XIAOZHI_ENABLE_CAMERA_ENDIANNESS_SWAP
+#endif  // CONFIG_WISIO_ENABLE_CAMERA_ENDIANNESS_SWAP
                     frame_.format = sensor_format_;
                     break;
                 case V4L2_PIX_FMT_YUV422P: {
                     // 这个格式是 422 YUYV，不是 planer
                     frame_.format = V4L2_PIX_FMT_YUYV;
-#ifdef CONFIG_XIAOZHI_ENABLE_CAMERA_ENDIANNESS_SWAP
+#ifdef CONFIG_WISIO_ENABLE_CAMERA_ENDIANNESS_SWAP
                     {
                         auto src16 = (uint16_t*)mmap_buffers_[buf.index].start;
                         auto dst16 = (uint16_t*)frame_.data;
@@ -492,7 +492,7 @@ bool EspVideo::Capture() {
 #else
                     memcpy(frame_.data, mmap_buffers_[buf.index].start,
                            MIN(mmap_buffers_[buf.index].length, frame_.len));
-#endif  // CONFIG_XIAOZHI_ENABLE_CAMERA_ENDIANNESS_SWAP
+#endif  // CONFIG_WISIO_ENABLE_CAMERA_ENDIANNESS_SWAP
                     break;
                 }
                 case V4L2_PIX_FMT_RGB565X: {
@@ -515,7 +515,7 @@ bool EspVideo::Capture() {
                     return false;
             }
 
-#ifdef CONFIG_XIAOZHI_ENABLE_ROTATE_CAMERA_IMAGE
+#ifdef CONFIG_WISIO_ENABLE_ROTATE_CAMERA_IMAGE
 #ifndef CONFIG_SOC_PPA_SUPPORTED
             uint8_t* rotate_dst =
                 (uint8_t*)heap_caps_aligned_alloc(64, frame_.len, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
@@ -749,7 +749,7 @@ bool EspVideo::Capture() {
             heap_caps_free(rotate_src);
             rotate_src = nullptr;
 #endif  // CONFIG_SOC_PPA_SUPPORTED
-#endif  // CONFIG_XIAOZHI_ENABLE_ROTATE_CAMERA_IMAGE
+#endif  // CONFIG_WISIO_ENABLE_ROTATE_CAMERA_IMAGE
         }
 
         if (ioctl(video_fd_, VIDIOC_QBUF, &buf) != 0) {
@@ -831,7 +831,7 @@ bool EspVideo::Capture() {
                 lvgl_image_size = frame_.len;  // fallthrough 时兼顾 YUYV 与 RGB565
                 break;
 
-#ifdef CONFIG_XIAOZHI_CAMERA_ALLOW_JPEG_INPUT
+#ifdef CONFIG_WISIO_CAMERA_ALLOW_JPEG_INPUT
             case V4L2_PIX_FMT_JPEG: {
                 uint8_t* out_data = nullptr;  // out data is allocated by jpeg_to_image
                 size_t out_len = 0;

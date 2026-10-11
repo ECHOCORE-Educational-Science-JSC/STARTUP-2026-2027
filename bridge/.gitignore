@@ -10,3 +10,9 @@ test-tmp/
 .wisio_alert_secret
 bridge_secrets.cmd
 .env
+image-cache/
+.wisio_serpapi_secret
+.wisio_serpapi_secret.*.tmp
+
+wisio_memory.json
+.cache/
