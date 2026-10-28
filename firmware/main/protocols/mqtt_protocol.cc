@@ -1,6 +1,9 @@
 #include "mqtt_protocol.h"
 #include "application.h"
+#include "audio_packet.h"
 #include "board.h"
+#include "network_endpoint.h"
+#include "protocol_json.h"
 #include "settings.h"
 
 #include <esp_log.h>
@@ -90,8 +93,20 @@ bool MqttProtocol::StartMqttClient(bool report_error) {
         return false;
     }
 
+    std::string broker_address;
+    int broker_port;
+    if (!network_endpoint::Parse(endpoint, broker_address, broker_port)) {
+        ESP_LOGE(TAG, "Invalid MQTT endpoint");
+        if (report_error)
+            SetError(Lang::Strings::SERVER_NOT_FOUND);
+        return false;
+    }
     auto network = Board::GetInstance().GetNetwork();
     mqtt_ = network->CreateMqtt(0);
+    if (!mqtt_) {
+        ESP_LOGE(TAG, "Failed to create MQTT client");
+        return false;
+    }
     mqtt_->SetKeepAlive(keepalive_interval);
 
     mqtt_->OnDisconnected([this]() {
@@ -146,15 +161,6 @@ bool MqttProtocol::StartMqttClient(bool report_error) {
     });
 
     ESP_LOGI(TAG, "Connecting to endpoint %s", endpoint.c_str());
-    std::string broker_address;
-    int broker_port = 8883;
-    size_t pos = endpoint.find(':');
-    if (pos != std::string::npos) {
-        broker_address = endpoint.substr(0, pos);
-        broker_port = std::stoi(endpoint.substr(pos + 1));
-    } else {
-        broker_address = endpoint;
-    }
     if (!mqtt_->Connect(broker_address, broker_port, client_id, username, password)) {
         ESP_LOGE(TAG, "Failed to connect to endpoint, code=%d", mqtt_->GetLastError());
         SetError(Lang::Strings::SERVER_NOT_CONNECTED);
@@ -166,7 +172,7 @@ bool MqttProtocol::StartMqttClient(bool report_error) {
 }
 
 bool MqttProtocol::SendText(const std::string& text) {
-    if (publish_topic_.empty()) {
+    if (publish_topic_.empty() || mqtt_ == nullptr || !mqtt_->IsConnected()) {
         return false;
     }
     if (!mqtt_->Publish(publish_topic_, text)) {
@@ -179,7 +185,7 @@ bool MqttProtocol::SendText(const std::string& text) {
 
 bool MqttProtocol::SendAudio(std::unique_ptr<AudioStreamPacket> packet) {
     std::lock_guard<std::mutex> lock(channel_mutex_);
-    if (udp_ == nullptr) {
+    if (udp_ == nullptr || !packet || !audio_packet::ValidPayloadSize(packet->payload.size())) {
         return false;
     }
 
@@ -225,7 +231,7 @@ void MqttProtocol::CloseAudioChannel(bool send_goodbye) {
     // Don't send if server already sent goodbye (to avoid ping-pong)
     if (send_goodbye) {
         std::string message = "{";
-        message += "\"session_id\":\"" + session_id_ + "\",";
+        message += "\"session_id\":" + protocol_json::Quote(session_id_) + ",";
         message += "\"type\":\"goodbye\"";
         message += "}";
         SendText(message);
@@ -265,6 +271,10 @@ bool MqttProtocol::OpenAudioChannel() {
 
     auto network = Board::GetInstance().GetNetwork();
     auto udp = network->CreateUdp(2);
+    if (!udp) {
+        ESP_LOGE(TAG, "Failed to create UDP audio channel");
+        return false;
+    }
     udp->OnMessage([this](const std::string& data) {
         /*
          * UDP Encrypted OPUS Packet Format:
@@ -289,7 +299,8 @@ bool MqttProtocol::OpenAudioChannel() {
         payload_len = ntohs(payload_len);
         timestamp = ntohl(timestamp);
         sequence = ntohl(sequence);
-        if (data.size() != kAudioHeaderSize + payload_len) {
+        if (!audio_packet::ValidPayloadSize(payload_len) ||
+            data.size() != kAudioHeaderSize + payload_len) {
             ESP_LOGE(TAG, "Audio payload length mismatch: header=%u, datagram=%zu",
                      static_cast<unsigned>(payload_len), data.size() - kAudioHeaderSize);
             return;
@@ -382,25 +393,10 @@ void MqttProtocol::ParseServerHello(const cJSON* root) {
         return;
     }
 
-    ParseServerGreeting(root);
-
-    auto session_id = cJSON_GetObjectItem(root, "session_id");
-    if (cJSON_IsString(session_id)) {
-        session_id_ = session_id->valuestring;
-        ESP_LOGI(TAG, "Session ID: %s", session_id_.c_str());
-    }
-
-    // Get sample rate from hello message
-    auto audio_params = cJSON_GetObjectItem(root, "audio_params");
-    if (cJSON_IsObject(audio_params)) {
-        auto sample_rate = cJSON_GetObjectItem(audio_params, "sample_rate");
-        if (cJSON_IsNumber(sample_rate)) {
-            server_sample_rate_ = sample_rate->valueint;
-        }
-        auto frame_duration = cJSON_GetObjectItem(audio_params, "frame_duration");
-        if (cJSON_IsNumber(frame_duration)) {
-            server_frame_duration_ = frame_duration->valueint;
-        }
+    int sample_rate, frame_duration;
+    if (!ParseServerAudioParameters(root, sample_rate, frame_duration)) {
+        ESP_LOGE(TAG, "Unsupported server audio parameters");
+        return;
     }
 
     auto udp = cJSON_GetObjectItem(root, "udp");
@@ -413,7 +409,8 @@ void MqttProtocol::ParseServerHello(const cJSON* root) {
     auto key_item = cJSON_GetObjectItem(udp, "key");
     auto nonce_item = cJSON_GetObjectItem(udp, "nonce");
     if (!cJSON_IsString(server) || !cJSON_IsNumber(port) || port->valueint <= 0 ||
-        port->valueint > UINT16_MAX || !cJSON_IsString(key_item) || !cJSON_IsString(nonce_item)) {
+        port->valueint > UINT16_MAX || port->valuedouble != port->valueint ||
+        !cJSON_IsString(key_item) || !cJSON_IsString(nonce_item)) {
         ESP_LOGE(TAG, "Invalid UDP server, port, key, or nonce");
         return;
     }
@@ -466,6 +463,11 @@ void MqttProtocol::ParseServerHello(const cJSON* root) {
         local_sequence_ = 0;
         remote_sequence_ = 0;
     }
+    server_sample_rate_ = sample_rate;
+    server_frame_duration_ = frame_duration;
+    ParseServerGreeting(root);
+    const auto session_id = cJSON_GetObjectItem(root, "session_id");
+    session_id_ = cJSON_IsString(session_id) ? session_id->valuestring : "";
     xEventGroupSetBits(event_group_handle_, MQTT_PROTOCOL_SERVER_HELLO_EVENT);
 }
 

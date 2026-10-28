@@ -42,6 +42,7 @@ private:
         std::string command;
         std::string text;
         std::string action;
+        std::string phonemes;
     };
 
     // multinet 相关成员变量
@@ -61,6 +62,12 @@ private:
     std::atomic<bool> running_ = false;
     std::vector<int16_t> input_buffer_;
     std::mutex input_buffer_mutex_;
+    size_t diagnostic_samples_ = 0;
+    int diagnostic_peak_ = 0;
+    uint64_t diagnostic_energy_ = 0;
+    size_t diagnostic_clipped_ = 0;
+    unsigned diagnostic_detections_ = 0;
+    unsigned diagnostic_timeouts_ = 0;
 
     TaskHandle_t wake_word_encode_task_ = nullptr;
     StaticTask_t* wake_word_encode_task_buffer_ = nullptr;

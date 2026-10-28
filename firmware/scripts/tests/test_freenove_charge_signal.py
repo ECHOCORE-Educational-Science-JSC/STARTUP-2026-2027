@@ -1,9 +1,9 @@
-"""Run the board's battery-to-application path with a fake ADC and GPIO."""
-
+"""The mains-powered Freenove must not report, monitor or react to a battery."""
 import json
 import os
 from pathlib import Path
 import subprocess
+import shutil
 import tempfile
 import unittest
 
@@ -21,70 +21,39 @@ def method(source, signature):
     return source[start:end]
 
 
-class FreenoveChargeSignalTest(unittest.TestCase):
-    def test_adc_estimate_and_unused_gpio_cannot_shut_down_screen(self):
-        database = ROOT / "build/compile_commands.json"
-        if not database.is_file():
-            self.skipTest("A configured compiler is required")
-        compiler = json.loads(os.environ["WISIO_TEST_CXX"]) if os.environ.get("WISIO_TEST_CXX") else [
-            json.loads(database.read_text())[0]["command"].split(" ", 1)[0]]
+class FreenoveMainsPowerTest(unittest.TestCase):
+    def test_no_adc_monitor_or_charging_callback_is_registered(self):
         source = (BOARD / "freenove-esp32s3-display-2.8-lcd.cc").read_text(encoding="utf-8")
-        update = method(source, "void UpdateChargingScreen(bool charging)").replace(
-            "void UpdateChargingScreen", "constexpr void UpdateChargingScreen").replace(
-            "Application::GetInstance()", "application")
+        self.assertNotIn('AdcBatteryMonitor', source)
+        self.assertNotIn('InitializeBatteryMonitor', source)
+        self.assertNotIn('SetChargingMode', source)
+        self.assertNotIn('UpdateChargingScreen', source)
+
+    def test_battery_contract_is_unsupported_and_never_reports_low_or_charging(self):
+        compiler_path = shutil.which('g++') or 'C:/Program Files/CodeBlocks/MinGW/bin/g++.exe'
+        if not Path(compiler_path).is_file():
+            self.skipTest('Host C++ compiler unavailable')
+        compiler = [compiler_path]
+        source = (BOARD / "freenove-esp32s3-display-2.8-lcd.cc").read_text(encoding="utf-8")
         battery = method(source, "virtual bool GetBatteryLevel(int& level, bool& charging, bool& discharging) override").replace(
             "virtual bool", "constexpr bool").replace(" override", "")
-        program = r'''
-        #include "config.h"
-        struct State {
-            int value = -1;
-            constexpr int exchange(int next) { int previous = value; value = next; return previous; }
-        };
-        struct Display { constexpr bool IsSetupUICalled() const { return true; } };
-        struct Monitor {
-            int pin = BATTERY_CHARGING_GPIO;
-            bool noisy_estimate = true;
-            constexpr bool HasChargingStatusSignal() const { return pin != GPIO_NUM_NC; }
-            constexpr bool IsCharging() const { return noisy_estimate; }
-            constexpr int GetBatteryLevel() const { return 65; }
-        };
-        struct Application {
-            bool asleep = false;
-            constexpr void SetChargingMode(bool charging) { asleep = charging; }
-        };
-        struct Fixture {
-            Display display;
-            Display* display_ = &display;
-            Monitor monitor;
-            Monitor* adc_battery_monitor_ = &monitor;
-            State charging_screen_state_;
-            Application application;
-        ''' + update + battery + r'''
-        };
-        constexpr bool battery_or_usb_noise_never_disables_robot() {
-            Fixture robot;
-            for (int i = 0; i < 20; ++i) {
-                robot.monitor.noisy_estimate = (i % 2 == 0);
-                int level = 0; bool charging = true, discharging = false;
-                robot.GetBatteryLevel(level, charging, discharging);
-                if (charging || !discharging || level != 65 || robot.application.asleep) return false;
-                robot.UpdateChargingScreen(true); // stale estimator callback must also be harmless
-                if (robot.application.asleep) return false;
+        program = "struct Board {" + battery + "};" + r"""
+        constexpr bool mains_has_no_battery_state() {
+            Board board;
+            int inputs[] = {0, 1, 50, 100, -1};
+            for (int initial : inputs) {
+                int level = initial;
+                bool charging = true, discharging = true;
+                if (board.GetBatteryLevel(level, charging, discharging)) return false;
+                if (level != 0 || charging || discharging) return false;
             }
             return true;
         }
-        static_assert(battery_or_usb_noise_never_disables_robot(),
-                      "Unconnected CHRG must never suspend display/audio from GPIO or ADC noise");
-        '''
-        with tempfile.TemporaryDirectory() as directory:
-            include = Path(directory)
-            (include / "driver").mkdir()
-            (include / "driver/gpio.h").write_text(
-                "#pragma once\nenum { GPIO_NUM_NC = -1, GPIO_NUM_3 = 3 };\n")
-            result = subprocess.run(
-                [*compiler, "-std=c++20", "-fsyntax-only", "-x", "c++", "-I", str(include),
-                 "-I", str(BOARD), "-"], input=program, capture_output=True, text=True,
-                encoding="utf-8", timeout=30)
+        static_assert(mains_has_no_battery_state(), "No battery means no low-battery popup or charging state");
+        """
+        with tempfile.TemporaryDirectory(dir=ROOT / 'test-tmp') as directory:
+            result = subprocess.run([*compiler, "-std=c++20", "-fsyntax-only", "-x", "c++", "-"],
+                                    input=program, capture_output=True, text=True, encoding="utf-8", timeout=30)
         self.assertEqual(result.returncode, 0, result.stderr)
 
 

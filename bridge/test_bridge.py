@@ -584,7 +584,7 @@ class BridgeTest(unittest.IsolatedAsyncioTestCase):
                              'Keeping the Wisio voice must not force a Vietnamese accent on English')
             self.assertIn("Voice identity is separate from language-specific pronunciation", instruction)
             self.assertIn("Do not switch an English-only activity to Vietnamese", instruction)
-            self.assertTrue("For a child's explanatory question, use five to eight short spoken sentences" in instruction,
+            self.assertTrue("For a child's explanatory question, usually use four to six useful short sentences" in instruction,
                             'Live setup must include the fuller child-friendly explanation policy')
             self.assertIn("Asia/Ho_Chi_Minh", instruction)
             self.assertIn("interactive CEFR A1-B2 English tutor", instruction)

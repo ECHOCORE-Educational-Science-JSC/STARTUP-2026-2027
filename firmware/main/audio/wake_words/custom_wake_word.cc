@@ -8,8 +8,20 @@
 #include <esp_mn_models.h>
 #include <esp_mn_speech_commands.h>
 #include <cJSON.h>
+#include <cmath>
+#include <string_view>
 
 #define TAG "CustomWakeWord"
+
+// The Wisio profile ships every pronunciation in assets. Require those phonemes
+// instead of guessing the coined name from English spelling at runtime.
+#if (CONFIG_SR_MN_EN_MULTINET7_QUANT || CONFIG_SR_MN_EN_MULTINET5_SINGLE_RECOGNITION_QUANT8) && \
+    defined(CONFIG_CUSTOM_WAKE_WORD)
+static constexpr bool kRequireWisioPhonemes =
+    std::string_view(CONFIG_CUSTOM_WAKE_WORD) == "HEY WISIO";
+#else
+static constexpr bool kRequireWisioPhonemes = false;
+#endif
 
 CustomWakeWord::CustomWakeWord()
     : wake_word_opus_() {
@@ -73,9 +85,14 @@ void CustomWakeWord::ParseWakenetModelConfig() {
                     cJSON* command_name = cJSON_GetObjectItem(command, "command");
                     cJSON* text = cJSON_GetObjectItem(command, "text");
                     cJSON* action = cJSON_GetObjectItem(command, "action");
-                    if (cJSON_IsString(command_name) && cJSON_IsString(text) && cJSON_IsString(action)) {
-                        commands_.push_back({command_name->valuestring, text->valuestring, action->valuestring});
-                        ESP_LOGI(TAG, "Command: %s, Text: %s, Action: %s", command_name->valuestring, text->valuestring, action->valuestring);
+                    cJSON* phonemes = cJSON_GetObjectItem(command, "phonemes");
+                    if (cJSON_IsString(command_name) && cJSON_IsString(text) &&
+                        cJSON_IsString(action)) {
+                        commands_.push_back(
+                            {command_name->valuestring, text->valuestring, action->valuestring,
+                             cJSON_IsString(phonemes) ? phonemes->valuestring : ""});
+                        ESP_LOGI(TAG, "Command: %s, Text: %s, Action: %s",
+                                 command_name->valuestring, text->valuestring, action->valuestring);
                     }
                 }
             }
@@ -142,7 +159,22 @@ bool CustomWakeWord::Initialize(AudioCodec* codec, srmodel_list_t* models_list) 
     commands_allocated_ = true;
     esp_mn_commands_clear();
     for (int i = 0; i < commands_.size(); i++) {
-        if (esp_mn_commands_add(i + 1, commands_[i].command.c_str()) != ESP_OK) {
+        const auto& command = commands_[i];
+        esp_err_t status;
+        if constexpr (kRequireWisioPhonemes) {
+            if (command.phonemes.empty()) {
+                ESP_LOGE(TAG, "Missing Hey Wisio phonemes; flash matching generated_assets.bin");
+                return false;
+            }
+            status = esp_mn_commands_phoneme_add(i + 1, command.command.c_str(),
+                                                 command.phonemes.c_str());
+        } else {
+            status = command.phonemes.empty()
+                         ? esp_mn_commands_add(i + 1, command.command.c_str())
+                         : esp_mn_commands_phoneme_add(i + 1, command.command.c_str(),
+                                                       command.phonemes.c_str());
+        }
+        if (status != ESP_OK) {
             ESP_LOGE(TAG, "Wake command could not be registered: %s", commands_[i].command.c_str());
             return false;
         }
@@ -166,7 +198,23 @@ void CustomWakeWord::OnWakeWordDetected(std::function<void(const std::string& wa
 }
 
 void CustomWakeWord::Start() {
+    std::lock_guard<std::mutex> lock(input_buffer_mutex_);
+    if (running_ || multinet_model_data_ == nullptr) {
+        return;
+    }
+    // Every standby session starts with a fresh decoder, not a partial phrase
+    // left behind by playback, listening, or a timed-out recognition window.
+    multinet_->clean(multinet_model_data_);
+    input_buffer_.clear();
+    diagnostic_samples_ = 0;
+    diagnostic_peak_ = 0;
+    diagnostic_energy_ = 0;
+    diagnostic_clipped_ = 0;
+    diagnostic_detections_ = 0;
+    diagnostic_timeouts_ = 0;
     running_ = true;
+    ESP_LOGI(TAG, "Wake ready: %s, model=%s, threshold=%.2f", commands_.front().text.c_str(),
+             mn_name_, threshold_);
 }
 
 void CustomWakeWord::Stop() {
@@ -189,10 +237,39 @@ void CustomWakeWord::FeedSamples(const int16_t* data, size_t samples, bool mono)
         return;
     }
 
-    std::lock_guard<std::mutex> lock(input_buffer_mutex_);
+    std::unique_lock<std::mutex> lock(input_buffer_mutex_);
     // Check running state inside lock to avoid TOCTOU race with Stop()
     if (!running_) {
         return;
+    }
+    const int chunksize = multinet_->get_samp_chunksize(multinet_model_data_);
+    if (chunksize <= 0)
+        return;
+
+    // One summary per ten seconds while waiting; no per-frame UART traffic.
+    const size_t stride = mono ? 1 : codec_->input_channels();
+    for (size_t i = 0; i < samples; i += stride) {
+        const int value = data[i];
+        const int magnitude = value < 0 ? -value : value;
+        if (magnitude > diagnostic_peak_)
+            diagnostic_peak_ = magnitude;
+        ++diagnostic_samples_;
+        diagnostic_energy_ += static_cast<uint64_t>(value * value);
+        if (magnitude >= 32760)
+            ++diagnostic_clipped_;
+    }
+    if (diagnostic_samples_ >= 16000 * 10) {
+        ESP_LOGI(TAG,
+                 "Wake listening: peak=%d rms=%.0f clipped=%.1f%% candidates=%u timeouts=%u (10s)",
+                 diagnostic_peak_, std::sqrt(double(diagnostic_energy_) / diagnostic_samples_),
+                 100.0 * diagnostic_clipped_ / diagnostic_samples_, diagnostic_detections_,
+                 diagnostic_timeouts_);
+        diagnostic_samples_ = 0;
+        diagnostic_peak_ = 0;
+        diagnostic_energy_ = 0;
+        diagnostic_clipped_ = 0;
+        diagnostic_detections_ = 0;
+        diagnostic_timeouts_ = 0;
     }
 
     // If input channels is 2, we need to fetch the left channel data
@@ -203,21 +280,23 @@ void CustomWakeWord::FeedSamples(const int16_t* data, size_t samples, bool mono)
     } else {
         input_buffer_.insert(input_buffer_.end(), data, data + samples);
     }
-    
-    int chunksize = multinet_->get_samp_chunksize(multinet_model_data_);
+
     while (input_buffer_.size() >= chunksize) {
 #if CONFIG_SEND_WAKE_WORD_DATA
         wake_word_audio_cache_.Store(input_buffer_.data(), chunksize);
 #endif
 
         esp_mn_state_t mn_state = multinet_->detect(multinet_model_data_, input_buffer_.data());
-        
+
         if (mn_state == ESP_MN_STATE_DETECTED) {
+            ++diagnostic_detections_;
             esp_mn_results_t *mn_result = multinet_->get_results(multinet_model_data_);
-            for (int i = 0; i < mn_result->num && running_; i++) {
+            for (int i = 0; mn_result != nullptr && i < mn_result->num &&
+                            i < ESP_MN_RESULT_MAX_NUM && running_;
+                 i++) {
                 const int command_id = mn_result->command_id[i];
                 if (command_id <= 0 || static_cast<size_t>(command_id) > commands_.size() ||
-                    mn_result->prob[i] < threshold_)
+                    !std::isfinite(mn_result->prob[i]) || mn_result->prob[i] < threshold_)
                     continue;
                 ESP_LOGI(TAG, "Custom wake word detected: command_id=%d, string=%s, prob=%f",
                          mn_result->command_id[i], mn_result->string, mn_result->prob[i]);
@@ -226,14 +305,21 @@ void CustomWakeWord::FeedSamples(const int16_t* data, size_t samples, bool mono)
                     last_detected_wake_word_ = command.text;
                     running_ = false;
                     input_buffer_.clear();
-                    
-                    if (wake_word_detected_callback_) {
-                        wake_word_detected_callback_(last_detected_wake_word_);
-                    }
+
+                    multinet_->clean(multinet_model_data_);
+                    const auto callback = wake_word_detected_callback_;
+                    const auto detected = last_detected_wake_word_;
+                    // A callback may stop/reconfigure wake and acquire AFE locks.
+                    // Never call it while holding the detector's feed mutex.
+                    lock.unlock();
+                    if (callback)
+                        callback(detected);
+                    return;
                 }
             }
             multinet_->clean(multinet_model_data_);
         } else if (mn_state == ESP_MN_STATE_TIMEOUT) {
+            ++diagnostic_timeouts_;
             ESP_LOGD(TAG, "Command word detection timeout, cleaning state");
             multinet_->clean(multinet_model_data_);
         }

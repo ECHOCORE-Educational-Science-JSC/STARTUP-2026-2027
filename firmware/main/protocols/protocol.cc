@@ -1,9 +1,44 @@
 #include "protocol.h"
 #include "assets.h"
+#include "audio_packet.h"
+#include "protocol_json.h"
+
+#include <cstring>
 
 #include <esp_log.h>
 
 #define TAG "Protocol"
+
+bool Protocol::ParseServerAudioParameters(const cJSON* root, int& sample_rate, int& duration) {
+    int rate = 24000, frame = 60;
+    const auto params = cJSON_GetObjectItem(root, "audio_params");
+    if (params != nullptr) {
+        if (!cJSON_IsObject(params))
+            return false;
+        const auto format = cJSON_GetObjectItem(params, "format");
+        if (format && (!cJSON_IsString(format) || strcmp(format->valuestring, "opus") != 0))
+            return false;
+        const auto channels = cJSON_GetObjectItem(params, "channels");
+        if (channels && (!cJSON_IsNumber(channels) || channels->valuedouble != 1))
+            return false;
+        const auto read_integer = [](const cJSON* value, int& target) {
+            if (value == nullptr)
+                return true;
+            if (!cJSON_IsNumber(value) || value->valuedouble != value->valueint)
+                return false;
+            target = value->valueint;
+            return true;
+        };
+        if (!read_integer(cJSON_GetObjectItem(params, "sample_rate"), rate) ||
+            !read_integer(cJSON_GetObjectItem(params, "frame_duration"), frame))
+            return false;
+    }
+    if (!audio_packet::ValidFormat(rate, frame))
+        return false;
+    sample_rate = rate;
+    duration = frame;
+    return true;
+}
 
 void Protocol::AddTextFontCapabilities(cJSON* root) {
     auto capability = Assets::GetInstance().text_font_capability();
@@ -56,7 +91,8 @@ void Protocol::SetError(const std::string& message) {
 }
 
 void Protocol::SendAbortSpeaking(AbortReason reason) {
-    std::string message = "{\"session_id\":\"" + session_id_ + "\",\"type\":\"abort\"";
+    std::string message =
+        "{\"session_id\":" + protocol_json::Quote(session_id_) + ",\"type\":\"abort\"";
     if (reason == kAbortReasonWakeWordDetected) {
         message += ",\"reason\":\"wake_word_detected\"";
     }
@@ -65,14 +101,15 @@ void Protocol::SendAbortSpeaking(AbortReason reason) {
 }
 
 void Protocol::SendWakeWordDetected(const std::string& wake_word) {
-    std::string json = "{\"session_id\":\"" + session_id_ +
-                       "\",\"type\":\"listen\",\"state\":\"detect\",\"text\":\"" + wake_word +
-                       "\"}";
+    std::string json =
+        "{\"session_id\":" + protocol_json::Quote(session_id_) +
+        ",\"type\":\"listen\",\"state\":\"detect\",\"text\":" + protocol_json::Quote(wake_word) +
+        "}";
     SendText(json);
 }
 
 void Protocol::SendStartListening(ListeningMode mode) {
-    std::string message = "{\"session_id\":\"" + session_id_ + "\"";
+    std::string message = "{\"session_id\":" + protocol_json::Quote(session_id_);
     message += ",\"type\":\"listen\",\"state\":\"start\"";
     if (mode == kListeningModeRealtime) {
         message += ",\"mode\":\"realtime\"";
@@ -86,14 +123,14 @@ void Protocol::SendStartListening(ListeningMode mode) {
 }
 
 void Protocol::SendStopListening() {
-    std::string message =
-        "{\"session_id\":\"" + session_id_ + "\",\"type\":\"listen\",\"state\":\"stop\"}";
+    std::string message = "{\"session_id\":" + protocol_json::Quote(session_id_) +
+                          ",\"type\":\"listen\",\"state\":\"stop\"}";
     SendText(message);
 }
 
 void Protocol::SendMcpMessage(const std::string& payload) {
-    std::string message =
-        "{\"session_id\":\"" + session_id_ + "\",\"type\":\"mcp\",\"payload\":" + payload + "}";
+    std::string message = "{\"session_id\":" + protocol_json::Quote(session_id_) +
+                          ",\"type\":\"mcp\",\"payload\":" + payload + "}";
     SendText(message);
 }
 

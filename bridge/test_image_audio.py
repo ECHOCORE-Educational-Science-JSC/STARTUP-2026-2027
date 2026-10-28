@@ -70,6 +70,7 @@ class PendingImages:
         pass
 
 
+@unittest.skip('Lesson picture delivery removed from live conversations on 18/10/2026; see test_voice_only')
 class ImageAudioContinuityTest(unittest.IsolatedAsyncioTestCase):
     async def assert_event_occurs(self, event, message):
         try:

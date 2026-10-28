@@ -47,7 +47,9 @@ inline bool cJSON_IsTrue(const cJSON* item) { return item && item->type==2; }
 #include "protocol.h"
 #include "device_state_machine.h"
 int wake_events=0, wake_audio=0;
+#ifndef CONFIG_SEND_WAKE_WORD_DATA
 #define CONFIG_SEND_WAKE_WORD_DATA 1
+#endif
 void Protocol::SendWakeWordDetected(const std::string&) { ++wake_events; }
 void Protocol::SendStartListening(ListeningMode) {}
 void Protocol::SendStopListening() {}
@@ -146,7 +148,7 @@ int main() {
     wake_legacy.storage.ParseServerGreeting(&hello);
     wake_legacy.ContinueWakeWordInvoke("Wisio");
     if(wake_legacy.GetDeviceState()!=kDeviceStateListening || !wake_legacy.audio_service_.mic ||
-       wake_audio!=2 || wake_events!=1) return 10;
+       wake_audio!=(CONFIG_SEND_WAKE_WORD_DATA ? 2 : 0) || wake_events!=1) return 10;
     return 0;
 }
 '''
@@ -160,14 +162,17 @@ int main() {
             environment = dict(os.environ)
             environment["PATH"] = str(Path(compiler).parent) + os.pathsep + environment.get("PATH", "")
             executable = temporary / "test.exe"
-            compiled = subprocess.run([
-                compiler, "-std=c++17", "-I", str(temporary), "-I", str(ROOT / "main"),
-                "-I", str(ROOT / "main/protocols"), str(ROOT / "main/device_state_machine.cc"),
-                str(temporary / "test.cc"), "-o", str(executable),
-            ], env=environment, capture_output=True, text=True)
-            self.assertEqual(compiled.returncode, 0, compiled.stderr)
-            result = subprocess.run([str(executable)], env=environment, capture_output=True, text=True)
-            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            for upload in (0, 1):
+                with self.subTest(wake_audio_upload=upload):
+                    compiled = subprocess.run([
+                        compiler, "-std=c++17", f"-DCONFIG_SEND_WAKE_WORD_DATA={upload}",
+                        "-I", str(temporary), "-I", str(ROOT / "main"),
+                        "-I", str(ROOT / "main/protocols"), str(ROOT / "main/device_state_machine.cc"),
+                        str(temporary / "test.cc"), "-o", str(executable),
+                    ], env=environment, capture_output=True, text=True)
+                    self.assertEqual(compiled.returncode, 0, compiled.stderr)
+                    result = subprocess.run([str(executable)], env=environment, capture_output=True, text=True)
+                    self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
     def test_both_transports_clear_and_parse_the_opt_in(self):
         for transport in ("websocket", "mqtt"):

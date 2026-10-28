@@ -82,6 +82,7 @@ int main() {
 #include <memory>
 #include <string>
 #include <stdexcept>
+#include "audio/music_playback_clock.h"
 #define ESP_LOGW(...) ((void)0)
 int decodes=0, images=0;
 struct LvglImage { virtual ~LvglImage()=default; };
@@ -110,11 +111,15 @@ struct MusicCover {
 };
 constexpr int kDeviceStateSpeaking=7;
 struct Audio {
+    MusicPlaybackClock clock;
+    void StartMusicPlaybackClock(){clock.Start(24000);}
+    uint32_t MusicPlaybackPositionMs(){return clock.PositionMs();}
     bool mic=true,wake=true;
     void EnableVoiceProcessing(bool on){mic=on;}
     void EnableWakeWordDetection(bool on){wake=on;}
 };
 struct Application {
+    uint32_t music_duration_ms_=0;
     bool music_playback_=false,aborted_=true; int music_idle_seconds_=9,state=0;
     std::string music_playback_token_; Audio audio_service_;
     void SetDeviceState(int s){state=s;}
@@ -133,18 +138,21 @@ int main(){
     if(decodes!=1 || images!=1) return 2;
 #endif
     auto repeat=std::make_shared<MusicCover>(); repeat->data.reset(std::malloc(1));
-    app.ApplyStart(&display,"one","Bài một","",65000,true,4200,repeat);
+    auto epoch=app.audio_service_.clock.epoch();
+    app.audio_service_.clock.Written(epoch,100800); // 4.2 seconds actually written.
+    app.ApplyStart(&display,"one","Bài một","",65000,true,50000,repeat);
     if(display.starts!=1 || display.position!=4200 || display.updates!=1 ||
        display.title!="Bài một" || app.audio_service_.mic || app.audio_service_.wake) return 3;
 #if HAVE_LVGL
     if(decodes!=1 || images!=1 || !repeat->data) return 4; // No repeated decode/ownership transfer.
 #endif
     app.ApplyStart(&display,"one","Bài một","",65000,false,0,repeat);
-    if(display.starts!=1 || display.position!=4200 || display.updates!=1) return 5;
+    if(display.starts!=1 || display.position!=4200 || display.updates!=2 ||
+       app.audio_service_.clock.epoch()!=epoch) return 5;
     auto next=std::make_shared<MusicCover>();
     app.ApplyStart(&display,"two","Bài hai","",0,false,0,next);
     if(display.starts!=2 || display.position!=0 || display.title!="Bài hai" ||
-       app.music_playback_token_!="two") return 6;
+       app.music_playback_token_!="two" || app.audio_service_.MusicPlaybackPositionMs()!=0) return 6;
     return 0;
 }
 '''.replace("CALLBACK", body)
@@ -174,7 +182,7 @@ struct lv_img_dsc_t { struct { int w=320,h=240; } header; };
 struct LvglImage { lv_img_dsc_t dsc; static int alive; LvglImage(){++alive;} virtual ~LvglImage(){--alive;}
  const lv_img_dsc_t* image_dsc() const{return &dsc;} }; int LvglImage::alive=0;
 struct FakeGif { bool running=true; void Stop(){running=false;} void Start(){running=true;} };
-struct lv_obj_t { bool hidden=false; int w=0,h=0,z=0,bg_opa=0; const lv_img_dsc_t* src=nullptr;
+struct lv_obj_t { bool hidden=false; int w=0,h=0,z=0,bg_opa=0,value=0,anim=-1; const lv_img_dsc_t* src=nullptr;
  std::string text; lv_obj_t* parent=nullptr; };
 int layers=0; lv_obj_t screen;
 lv_obj_t* lv_screen_active(){return &screen;}
@@ -199,7 +207,8 @@ STUB(lv_obj_set_style_border_width) STUB(lv_obj_set_style_pad_all)
 STUB(lv_obj_set_style_border_color)
 STUB(lv_obj_set_style_bg_color) STUB(lv_obj_set_scrollbar_mode)
 STUB(lv_label_set_long_mode) STUB(lv_obj_set_style_text_color)
-STUB(lv_obj_set_style_text_align) STUB(lv_bar_set_range) STUB(lv_bar_set_value)
+STUB(lv_obj_set_style_text_align) STUB(lv_bar_set_range)
+void lv_bar_set_value(lv_obj_t* o,int v,int a){o->value=v;o->anim=a;}
 STUB(lv_image_set_scale) STUB(esp_timer_stop) STUB(lv_obj_remove_style_all)
 STUB(lv_obj_set_style_outline_width) STUB(lv_obj_set_style_shadow_width)
 struct LcdDisplay {
@@ -235,8 +244,18 @@ int main(){
  LcdDisplay d;
  d.ShowMusicPlayerWithCover("Bài một","",65000,std::make_unique<LvglImage>(),0x123456);
  if(!complete(d,"Bài một") || d.locks!=1 || LvglImage::alive!=1 || d.music_time_label_->text!="00:00 / 01:05") return 1;
+ d.UpdateMusicProgress(5000,278000);
+ if(d.music_progress_bar_->value!=17 || d.music_progress_bar_->anim!=LV_ANIM_OFF ||
+    d.music_time_label_->text!="00:05 / 04:38") return 7;
+ d.UpdateMusicProgress(139000,278000);
+ if(d.music_progress_bar_->value!=500) return 8;
+ d.UpdateMusicProgress(300000,278000);
+ if(d.music_progress_bar_->value!=1000 || d.music_time_label_->text!="04:38 / 04:38") return 9;
+ d.UpdateMusicProgress(5000,0);
+ if(d.music_progress_bar_->value!=0 || d.music_time_label_->text!="00:05 / --:--") return 10;
+ d.locks=1;
  d.ShowMusicPlayer("Bài hai","",0);
- if(!complete(d,"Bài hai") || d.locks!=2 || !d.music_cover_image_->hidden || LvglImage::alive!=0 || d.music_time_label_->text!="00:00 / --:--") return 2;
+ if(!complete(d,"Bài hai") || d.locks!=2 || !d.music_cover_image_->hidden || LvglImage::alive!=0 || d.music_time_label_->text!="00:00 / --:--" || d.music_progress_bar_->value!=0) return 2;
  d.SetMusicCover(std::make_unique<LvglImage>());
  if(!complete(d,"Bài hai") || !d.music_placeholder_->hidden || LvglImage::alive!=1) return 3;
  d.HideMusicPlayer();

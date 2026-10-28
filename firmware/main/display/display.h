@@ -55,6 +55,9 @@ public:
     virtual void SetEmojiCollection(std::shared_ptr<EmojiCollection>) {}
     virtual void SetupUI() { setup_ui_called_ = true; }
     virtual bool IsStartupComplete() const { return true; }
+    virtual void ShowWifiSetup(const std::string& message) {
+        SetChatMessage("system", message.c_str());
+    }
 
     inline int width() const { return width_; }
     inline int height() const { return height_; }

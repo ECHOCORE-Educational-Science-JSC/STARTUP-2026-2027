@@ -35,7 +35,13 @@ public:
     bool HasWakeWord() const override;
     bool IsWakeWordDetectionEnabled() const override;
     bool IsVoiceProcessingEnabled() const override;
-    bool IsAfeWakeWord() const override { return HasWakeWord(); }
+    // MultiNet can share AFE input, but needs a real speaker reference for
+    // playback wake. A microphone-only codec would hear our own greeting.
+    bool IsAfeWakeWord() const override {
+        return wake_detector_ == WakeDetector::kWakeNet ||
+               (wake_detector_ == WakeDetector::kMultiNet && codec_ != nullptr &&
+                codec_->input_reference());
+    }
     size_t GetFeedSize() const override;
 
     void OnWakeWordDetected(std::function<void(const std::string& wake_word)> callback) override;
@@ -104,6 +110,7 @@ private:
     void ApplyPendingReset();
     void OutputRawAudio(const std::vector<int16_t>& data);
     void HandleWakeWordResult(const afe_fetch_result_t* result);
+    void NotifyWakeWordDetected(const std::string& wake_word);
     void HandleVoiceResult(const afe_fetch_result_t* result);
 };
 

@@ -6,6 +6,7 @@ import learning_session
 
 
 class VisualDeliveryStateTest(unittest.IsolatedAsyncioTestCase):
+    @unittest.skip('Lesson picture delivery removed from live conversations on 18/10/2026; see test_voice_only')
     async def test_revisiting_cached_vocabulary_redraws_the_current_screen(self):
         state = learning_session.LearningVisualState()
         loader = MagicMock()
@@ -20,6 +21,7 @@ class VisualDeliveryStateTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(loader.get.await_count, 2, 'Revisiting a verified word must not search again')
         self.assertEqual(device.send.await_count, 3, 'The robot currently shows dog, so cat must be redrawn')
 
+    @unittest.skip('Lesson picture delivery removed from live conversations on 18/10/2026; see test_voice_only')
     async def test_success_survives_model_turn_end_and_rephrased_dish_tool(self):
         state = learning_session.LearningVisualState()
         state.observe_user('Cho xem chân gà xào sả ớt trên đĩa trắng')
@@ -35,6 +37,7 @@ class VisualDeliveryStateTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(loader.get.await_count, 1)
         self.assertEqual(device.send.await_count, 1)
 
+    @unittest.skip('Lesson picture delivery removed from live conversations on 18/10/2026; see test_voice_only')
     async def test_new_user_request_must_not_reuse_conflicting_color(self):
         state = learning_session.LearningVisualState()
         loader = MagicMock()

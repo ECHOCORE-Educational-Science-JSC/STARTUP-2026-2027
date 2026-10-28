@@ -146,6 +146,8 @@ void Application::SetChargingMode(bool charging, int battery_level) {
             }
             pending_listening_start_ = false;
             music_playback_ = false;
+            music_duration_ms_ = 0;
+            audio_service_.StopMusicPlaybackClock();
             music_idle_seconds_ = 0;
             music_playback_token_.clear();
             notify_player_.Stop();
@@ -408,11 +410,15 @@ void Application::Run() {
             display->UpdateStatusBar();
 
             if (music_playback_) {
+                display->UpdateMusicProgress(audio_service_.MusicPlaybackPositionMs(),
+                                             music_duration_ms_);
                 if (audio_service_.IsPlaybackIdle()) {
                     music_idle_seconds_++;
                     if (music_idle_seconds_ >= 4) {
                         ESP_LOGI(TAG, "Music playback idle timeout, returning to idle");
                         music_playback_ = false;
+                        music_duration_ms_ = 0;
+                        audio_service_.StopMusicPlaybackClock();
                         music_playback_token_.clear();
                         display->HideMusicPlayer();
                         music_idle_seconds_ = 0;
@@ -796,11 +802,15 @@ void Application::InitializeProtocol() {
         }
     });
 
-    protocol_->OnAudioChannelClosed([this, &board]() {
-        board.SetPowerSaveLevel(PowerSaveLevel::LOW_POWER);
+    protocol_->OnAudioChannelClosed([this]() {
         Schedule([this]() {
-            auto display = Board::GetInstance().GetDisplay();
-            display->SetChatMessage("system", "");
+            // A close notification can be queued while a new handshake is running.
+            if (protocol_ && protocol_->IsAudioChannelOpened())
+                return;
+            auto& board = Board::GetInstance();
+            board.SetPowerSaveLevel(PowerSaveLevel::LOW_POWER);
+            if (auto display = board.GetDisplay())
+                display->SetChatMessage("system", "");
             SetDeviceState(kDeviceStateIdle);
         });
     });
@@ -857,11 +867,15 @@ void Application::InitializeProtocol() {
             const std::string action(action_json->valuestring);
             auto value_json = cJSON_GetObjectItem(root, "value");
             auto step_json = cJSON_GetObjectItem(root, "step");
-            const int value = cJSON_IsNumber(value_json) ? value_json->valueint : 70;
-            const int step = cJSON_IsNumber(step_json) ? step_json->valueint : 10;
-            Schedule([display, action, value, step]() {
+            const int value =
+                cJSON_IsNumber(value_json) ? std::clamp(value_json->valueint, 0, 100) : 70;
+            const int step =
+                cJSON_IsNumber(step_json) ? std::clamp(step_json->valueint, 0, 100) : 10;
+            Schedule([action, value, step]() {
                 auto* codec = Board::GetInstance().GetAudioCodec();
-                int volume = codec->output_volume();
+                if (!codec)
+                    return;
+                int volume = std::clamp(codec->output_volume(), 0, 100);
                 if (action == "up")
                     volume += step;
                 else if (action == "down")
@@ -874,7 +888,6 @@ void Application::InitializeProtocol() {
                     return;
                 volume = std::max(0, std::min(100, volume));
                 codec->SetOutputVolume(volume);
-                display->ShowNotification("Âm lượng " + std::to_string(volume) + "%");
             });
         } else if (strcmp(type->valuestring, "music") == 0) {
             auto state = cJSON_GetObjectItem(root, "state");
@@ -947,7 +960,6 @@ void Application::InitializeProtocol() {
                 auto title_json = cJSON_GetObjectItem(root, "title");
                 auto artist_json = cJSON_GetObjectItem(root, "artist");
                 auto duration_json = cJSON_GetObjectItem(root, "duration_ms");
-                auto position_json = cJSON_GetObjectItem(root, "position_ms");
                 std::string title =
                     cJSON_IsString(title_json) && strlen(title_json->valuestring) <= 160
                         ? title_json->valuestring
@@ -961,18 +973,9 @@ void Application::InitializeProtocol() {
                     duration_json->valuedouble <= std::numeric_limits<uint32_t>::max()) {
                     duration_ms = static_cast<uint32_t>(duration_json->valuedouble);
                 }
-                const bool has_position =
-                    cJSON_IsNumber(position_json) && position_json->valuedouble >= 0 &&
-                    position_json->valuedouble <= std::numeric_limits<uint32_t>::max();
-                const uint32_t position_ms =
-                    has_position
-                        ? ClampMusicPosition(static_cast<uint32_t>(position_json->valuedouble),
-                                             duration_ms)
-                        : 0;
                 auto cover = ReadMusicCover();
                 Schedule([this, display, token = std::move(token), title = std::move(title),
-                          artist = std::move(artist), duration_ms, has_position, position_ms,
-                          cover]() {
+                          artist = std::move(artist), duration_ms, cover]() {
                     const bool same_playback =
                         music_playback_ && !token.empty() && music_playback_token_ == token;
                     music_playback_ = true;
@@ -981,11 +984,14 @@ void Application::InitializeProtocol() {
                     if (same_playback) {
                         // A late listen event reasserts the existing player;
                         // keep its cover and never reset elapsed time to zero.
-                        if (has_position) {
-                            display->UpdateMusicProgress(position_ms, duration_ms);
-                        }
+                        if (duration_ms > 0)
+                            music_duration_ms_ = duration_ms;
+                        display->UpdateMusicProgress(audio_service_.MusicPlaybackPositionMs(),
+                                                     music_duration_ms_);
                     } else if (!token.empty()) {
                         music_playback_token_ = token;
+                        music_duration_ms_ = duration_ms;
+                        audio_service_.StartMusicPlaybackClock();
 #if HAVE_LVGL
                         if (auto* lvgl_display = dynamic_cast<LvglDisplay*>(display)) {
                             DisplayLockGuard lock(lvgl_display);
@@ -1050,16 +1056,16 @@ void Application::InitializeProtocol() {
                     ESP_LOGW(TAG, "Rejected invalid music progress");
                     return;
                 }
-                uint32_t position_ms = static_cast<uint32_t>(position_json->valuedouble);
                 const uint32_t duration_ms = static_cast<uint32_t>(duration_json->valuedouble);
-                if (duration_ms > 0 && position_ms > duration_ms) {
-                    position_ms = duration_ms;
-                }
-                Schedule([this, display, token = std::move(token), position_ms, duration_ms]() {
+                Schedule([this, display, token = std::move(token), duration_ms]() {
                     if (music_playback_token_ != token) {
                         return;
                     }
-                    display->UpdateMusicProgress(position_ms, duration_ms);
+                    if (duration_ms > 0)
+                        music_duration_ms_ = duration_ms;
+                    // Bridge positions describe queued/sent frames, not speaker output.
+                    display->UpdateMusicProgress(audio_service_.MusicPlaybackPositionMs(),
+                                                 music_duration_ms_);
                 });
             } else if (music_state == MusicMessageState::kStop) {
                 Schedule([this, display, token = std::move(token)]() {
@@ -1068,6 +1074,8 @@ void Application::InitializeProtocol() {
                         return;
                     }
                     music_playback_ = false;
+                    music_duration_ms_ = 0;
+                    audio_service_.StopMusicPlaybackClock();
                     music_playback_token_.clear();
                     display->HideMusicPlayer();
                     if (GetDeviceState() == kDeviceStateSpeaking) {
@@ -1433,6 +1441,8 @@ void Application::HandleToggleChatEvent() {
         SetListeningMode(mode);
     } else if (state == kDeviceStateSpeaking) {
         music_playback_ = false;
+        music_duration_ms_ = 0;
+        audio_service_.StopMusicPlaybackClock();
         music_idle_seconds_ = 0;
         AbortSpeaking(kAbortReasonNone);
     } else if (state == kDeviceStateListening) {
@@ -1550,6 +1560,9 @@ void Application::HandleWakeWordDetectedEvent() {
         BeginWakeWordInvoke(wake_word);
     } else if (state == kDeviceStateSpeaking || state == kDeviceStateListening) {
         AbortSpeaking(kAbortReasonWakeWordDetected);
+        // Stop queued speech now and notify the bridge even without wake audio.
+        audio_service_.ResetDecoder();
+        protocol_->SendWakeWordDetected(wake_word);
         // Clear send queue to avoid sending residues to server
         while (audio_service_.PopPacketFromSendQueue())
             ;
@@ -1635,15 +1648,16 @@ void Application::ContinueWakeWordInvoke(const std::string& wake_word) {
     while (auto packet = audio_service_.PopWakeWordPacket()) {
         protocol_->SendAudio(std::move(packet));
     }
-    // Set the chat state to wake word detected
+#endif
+    // The wake event is control metadata, independent of uploading recorded audio.
+    // The bridge needs it to acknowledge the caller even when uploads are disabled.
     protocol_->SendWakeWordDetected(wake_word);
-    SetListeningMode(GetDefaultListeningMode());
-#else
+#if !CONFIG_SEND_WAKE_WORD_DATA
     // Set flag to play popup sound after state changes to listening
     // (PlaySound here would be cleared by ResetDecoder in EnableVoiceProcessing)
     play_popup_on_listening_ = true;
-    SetListeningMode(GetDefaultListeningMode());
 #endif
+    SetListeningMode(GetDefaultListeningMode());
 }
 
 void Application::HandleStateChangedEvent() {
@@ -1674,6 +1688,8 @@ void Application::HandleStateChangedEvent() {
             audio_service_.EnableVoiceProcessing(false);
             audio_service_.EnableWakeWordDetection(true);
             music_playback_ = false;
+            music_duration_ms_ = 0;
+            audio_service_.StopMusicPlaybackClock();
             music_idle_seconds_ = 0;
             music_playback_token_.clear();
             display->HideMusicPlayer();
@@ -1837,6 +1853,8 @@ void Application::AbortSpeaking(AbortReason reason) {
     ESP_LOGI(TAG, "Abort speaking");
     aborted_ = true;
     music_playback_ = false;
+    music_duration_ms_ = 0;
+    audio_service_.StopMusicPlaybackClock();
     music_idle_seconds_ = 0;
     music_playback_token_.clear();
     Board::GetInstance().GetDisplay()->HideMusicPlayer();

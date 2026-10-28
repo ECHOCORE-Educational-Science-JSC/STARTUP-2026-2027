@@ -15,6 +15,7 @@ struct AudioStreamPacket {
     uint32_t timestamp = 0;
     uint32_t playback_id = 0;
     uint32_t media_position_ms = 0;
+    uint32_t music_epoch = 0;  // Local queue tag; never serialized on the wire.
     std::vector<uint8_t> payload;
 };
 
@@ -90,6 +91,7 @@ protected:
     virtual void SetError(const std::string& message);
     virtual bool IsTimeout() const;
     static void AddTextFontCapabilities(cJSON* root);
+    static bool ParseServerAudioParameters(const cJSON* root, int& sample_rate, int& duration);
     void ResetServerGreeting() { server_greeting_pending_ = false; }
     void ParseServerGreeting(const cJSON* root) {
         server_greeting_pending_ = cJSON_IsTrue(cJSON_GetObjectItem(root, "greeting_pending"));

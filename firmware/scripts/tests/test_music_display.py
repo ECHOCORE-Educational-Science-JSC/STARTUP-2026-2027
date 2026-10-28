@@ -61,10 +61,8 @@ class MusicDisplayContractTest(unittest.TestCase):
         self.assertIn("ShowChargingScreen", header)
         self.assertIn('"ĐANG SẠC\\n%d%%"', lcd)
         self.assertIn("lv_obj_set_width(charging_label_, LV_HOR_RES - 24)", lcd)
-        self.assertIn("OnChargingStatusChanged", board)
-        self.assertIn("SetChargingMode(charging)", board)
-        update = board[board.index("void UpdateChargingScreen("):board.index("void InitializeBatteryMonitor(")]
-        self.assertNotIn("GetBatteryLevel()", update, "Suspend must not wait for an ADC capacity read")
+        self.assertNotIn("OnChargingStatusChanged", board)
+        self.assertNotIn("SetChargingMode", board)
 
     def test_startup_separates_backlight_and_wifi_current_peaks(self):
         board = (ROOT / "main" / "boards" / "freenove-esp32s3-display-2.8-lcd" /

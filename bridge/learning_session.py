@@ -534,6 +534,47 @@ def vocabulary_prefetch_requests(text: str) -> list[dict[str, str]]:
 
 
 @dataclass
+class ConversationState:
+    """Lesson and hearing state without visual subject extraction or image jobs."""
+    active: bool = False
+    waiting_for_clarification: bool = False
+    user_turn_text: str = ''
+    _assistant_turn_text: str = field(default='', repr=False)
+
+    def request_clarification(self) -> None:
+        self.waiting_for_clarification = True
+
+    def observe_user(self, text: str) -> None:
+        cleaned = ' '.join(str(text).split())
+        if not cleaned:
+            return
+        if self.waiting_for_clarification:
+            self.finish_turn()
+        self.waiting_for_clarification = False
+        self.user_turn_text = (self.user_turn_text + ' ' + cleaned).strip()[-2000:]
+        if _contains_phrase(self.user_turn_text, LESSON_STOP_PHRASES):
+            self.active = False
+        elif _contains_phrase(self.user_turn_text, LESSON_START_PHRASES):
+            self.active = True
+
+    def observe_assistant(self, text: str) -> None:
+        self._assistant_turn_text = (self._assistant_turn_text + ' ' + str(text))[-500:]
+        if _asks_to_clarify_hearing(self._assistant_turn_text):
+            self.request_clarification()
+
+    def finish_turn(self) -> None:
+        # Only genuine new user input releases a hearing clarification.
+        self.user_turn_text = ''
+        self._assistant_turn_text = ''
+
+    def begin_proactive_turn(self) -> bool:
+        if self.waiting_for_clarification:
+            return False
+        self.finish_turn()
+        return True
+
+
+@dataclass
 class LearningVisualState:
     active: bool = False
     turn_word: str | None = None

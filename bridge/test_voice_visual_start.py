@@ -14,10 +14,10 @@ class EarlyTopicTest(unittest.TestCase):
     def test_38_live_can_acknowledge_image_search_while_music_stays_sequential(self):
         tools = bridge.live_tools_for_model('gemini-3.8-live')
         declarations = {d['name']: d for d in tools[0]['functionDeclarations']}
-        self.assertEqual(declarations['show_learning_image']['behavior'], 'NON_BLOCKING')
-        self.assertNotIn('behavior', declarations['play_song'])
-        older = bridge.live_tools_for_model('gemini-3.1-flash-live-preview')
-        self.assertFalse(any('behavior' in d for d in older[0]['functionDeclarations']))
+        self.assertNotIn('show_learning_image', declarations)
+        self.assertNotIn('prefetch_learning_images', declarations)
+        self.assertIn('play_song', declarations)
+        self.assertFalse(any('behavior' in d for d in declarations.values()))
 
     def test_single_drink_is_prefetched_before_any_assistant_reply(self):
         state = LearningVisualState()
@@ -36,6 +36,7 @@ class EarlyTopicTest(unittest.TestCase):
         self.assertIn('hai ly thuy tinh co da', refined[0]['query'])
 
 
+@unittest.skip('Lesson picture delivery removed from live conversations on 18/10/2026; see test_voice_only')
 class VisualSpeechStartTest(unittest.IsolatedAsyncioTestCase):
     async def run_explicit_mid_voice(self, abrupt=False):
         trace, replies = [], []

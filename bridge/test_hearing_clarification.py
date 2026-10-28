@@ -39,11 +39,10 @@ class HearingClarificationTest(unittest.IsolatedAsyncioTestCase):
         loader = MagicMock()
         loader.get = AsyncMock(return_value={'png': b'checked cat', 'verified': True})
         loader.close = AsyncMock()
-        with patch.object(bridge.learning_prefetch, 'LearningImagePrefetch', return_value=loader):
-            await bridge.gemini_output(
-                Gemini(), Device(), None, None, 's', 1,
-                {'gemini_content_seen': False}, bridge.new_speech_state(),
-                music_controller=controller, memory_store=memory, learning_visual_state=state)
+        await bridge.gemini_output(
+            Gemini(), Device(), None, None, 's', 1,
+            {'gemini_content_seen': False}, bridge.new_speech_state(),
+            music_controller=controller, memory_store=memory, learning_visual_state=state)
         responses = {item['id']: item['response'] for event in replies
                      for item in event.get('toolResponse', {}).get('functionResponses', [])}
         return responses, packets, controller, memory, loader, replies

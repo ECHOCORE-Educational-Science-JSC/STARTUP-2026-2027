@@ -6,11 +6,16 @@ Official github: [freenove-esp32s3-display-2.8-lcd](https://github.com/Freenove/
 
 Likely the same hardware design as [LCD wiki ES3C28P/ES3N28P](https://www.lcdwiki.com/2.8inch_ESP32-S3_Display)
 
-## Wisio charging and wake phrase
+## Wisio external power and wake phrase — 18/10/2026
 
-The [official 2.8-inch schematic](https://github.com/Freenove/Freenove_ESP32_S3_Display/blob/main/Schematic/2.8inch_ESP32-S3_Display_Schematic.pdf) does **not** connect TP4054 `CHRG` to the MCU. `CHRG` goes through R11 (10 kOhm) to ground; GPIO3 is expansion IO. The earlier GPIO3/pull-up claim was incorrect. `BATTERY_CHARGING_GPIO` therefore stays `GPIO_NUM_NC` and automatic charging shutdown is disabled on the stock board. The robot remains usable on battery or USB; voltage recovery and an unused GPIO cannot turn its screen/audio off.
+This Wisio configuration uses continuous external USB power, with no battery
+telemetry. The board does not create an ADC battery monitor, register a charge
+callback or report a supported battery capability. Battery percentages, low
+battery sounds/popups and automatic charge-mode suspension therefore cannot
+activate on this board. GPIO assignments for audio, LCD and touch are unchanged.
 
-The charging suspend implementation is retained for hardware with a real charge-status input: it suspends microphone capture, wake recognition, speaker output, music and conversation and turns off the LCD. The stock FNK0104 board cannot activate it automatically. Reliable charging detection requires a verified status connection and compatible pull-up circuitry, or a separate charger/power controller reporting status. Do not simply assign GPIO3 or wire CHRG without reviewing its existing pull-down and voltage levels. USB host activity is not a battery-charging signal, and a wall charger may not provide USB data activity.
+This software setting does not disable the physical charger IC. Shared charging
+support remains available to other board implementations with batteries.
 
 For the current configured project, run this in an ESP-IDF terminal from the firmware directory:
 
@@ -19,10 +24,28 @@ python scripts/configure_wisio_wake.py
 idf.py build
 ```
 
-The configuration tool preserves local settings and uses ESP-IDF Kconfig to select English MultiNet6 with `HEY WISIO`, displayed as `Hey Wisio`, at a 70% threshold. The canonical fresh-build alternative is:
+The configuration tool preserves local settings and uses ESP-IDF Kconfig to select English MultiNet5 Q8 with `HEY WISIO`, displayed as `Hey Wisio`, at a 70% threshold. The asset builder supplies explicit phonemes for “wee-zee-oh”, “wiz-ee-oh”, and “wiss-ee-oh”, so the coined name is not left to English spelling/G2P guesses. This profile requires matching phoneme assets and excludes the large automatic G2P dictionary from the app. Other custom commands keep their existing registration. The canonical fresh-build alternative is:
 
 ```powershell
 python scripts/build.py freenove-esp32s3-display-2.8-lcd --name freenove-esp32s3-display-2.8-lcd --language vi-VN --wake-word hey-wisio
 ```
 
-Flash the complete project, including `generated_assets.bin`. The phrase is recognized locally from standby, with recognition disabled during listening and charging. This uses custom MultiNet command recognition, not a separately trained WakeNet model. Physical tests with children's voices and background noise are still required; configuration and host tests do not establish wake accuracy. See [Espressif's custom-command documentation](https://docs.espressif.com/projects/esp-sr/en/latest/esp32s3/speech_command_recognition/README.html).
+Flash the complete project, including `generated_assets.bin`. The phrase is recognized locally from standby, with recognition disabled during listening. This uses custom MultiNet command recognition, not a separately trained WakeNet model. Physical tests with children's voices and background noise are still required; configuration and host tests do not establish wake accuracy. See [Espressif's custom-command documentation](https://docs.espressif.com/projects/esp-sr/en/latest/esp32s3/speech_command_recognition/README.html).
+
+### Diagnosing standby wake — 19/10/2026
+
+Flash the app and assets together after changing the MultiNet version. An app-only
+update leaves the old speech model on the device. In the ESP-IDF monitor, standby
+should show `Wake ready: Hey Wisio, model=mn5q8_en, threshold=0.70`. Every ten seconds,
+`Wake listening: mic peak=... (10s)` confirms that microphone frames actually reach
+the recognizer. A successful match logs `Custom wake word detected` followed by
+`Application: Wake word detected` and the connecting/listening state transition.
+Missing `Wake ready` means initialization/state needs investigation; no listening
+summary after it means audio capture/AFE needs investigation. A changing peak
+without a match means pronunciation/recognition still needs physical testing.
+The decoder and partial input are cleared each time wake is re-armed from standby;
+repeated enable calls while already running do not discard a phrase in progress.
+On this microphone-only codec, MultiNet is not advertised as playback-safe wake
+detection: it is disabled while the robot speaks/plays music, then re-enabled in
+standby. This keeps the robot's own greeting from being treated as a user wake
+phrase. Boards with a real speaker-reference input retain their AEC wake support.

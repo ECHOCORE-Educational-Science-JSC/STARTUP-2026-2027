@@ -14,6 +14,28 @@ SPEC.loader.exec_module(BUILD)
 
 
 class BuildDefaultAssetsTest(unittest.TestCase):
+    def test_wisio_assets_include_explicit_pronunciations_and_keep_other_commands(self):
+        config = {'wake_word': 'HEY WISIO', 'display': 'Hey Wisio'}
+        commands = BUILD.custom_wake_commands(config, ['mn5q8_en'])
+        self.assertEqual(commands, BUILD.custom_wake_commands(config, ['mn7_en']))
+        self.assertEqual([c['phonemes'] for c in commands],
+                         ['hd WmZmb', 'hd WgZmb', 'hd WgSmb', 'hd WmSmb', 'hd VmZmb', 'hd VmSmb',
+                          'hd WmSYb', 'hf WmSmb', 'hf WmZmb', 'hd WmSme'])
+        self.assertEqual(len({c['command'] for c in commands}), 10)
+        for command in commands:
+            self.assertEqual(command['text'], 'Hey Wisio')
+            self.assertEqual(command['action'], 'wake')
+        with tempfile.TemporaryDirectory() as directory:
+            BUILD.generate_index_json(directory, 'srmodels.bin', None, None,
+                                      multinet_model_info={'commands': commands})
+            packed = json.loads((Path(directory) / 'index.json').read_text())
+            self.assertEqual(packed['multinet_model']['commands'], commands)
+        self.assertEqual(BUILD.custom_wake_commands(config, ['mn6_en']),
+                         [{'command': 'HEY WISIO', 'text': 'Hey Wisio', 'action': 'wake'}])
+        config['wake_word'] = 'TURN ON THE LIGHT'
+        self.assertEqual(len(BUILD.custom_wake_commands(config, ['mn7_en'])), 1)
+        self.assertNotIn('phonemes', BUILD.custom_wake_commands(config, ['mn7_en'])[0])
+
     def test_text_font_metadata_uses_bundle_charset_size_and_bpp(self):
         with tempfile.TemporaryDirectory() as directory:
             assets = Path(directory)

@@ -327,6 +327,7 @@ class LearningImageToolTest(unittest.IsolatedAsyncioTestCase):
         self.enterContext(patch.object(learning_image.google_image_search, 'get_api_key', return_value=''))
         self.enterContext(patch.object(learning_image, '_read_cached_image', return_value=None))
 
+    @unittest.skip('Lesson picture delivery removed from live conversations on 18/10/2026; see test_voice_only')
     async def test_tool_success_names_the_authoritative_dish_instead_of_raw_chicken(self):
         class Gemini:
             def __init__(self): self.sent = []
@@ -358,6 +359,7 @@ class LearningImageToolTest(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn('illustration for chicken is', message)
         self.assertIn('lemongrass', message)
 
+    @unittest.skip('Lesson picture delivery removed from live conversations on 18/10/2026; see test_voice_only')
     async def test_verification_failure_is_not_retried_by_tool_correction_or_fallback(self):
         class Loader:
             def schedule(self, items): return len(items)
@@ -399,6 +401,7 @@ class LearningImageToolTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(replies), 2)
         self.assertIn('HTTP_503', replies[1]['error'])
 
+    @unittest.skip('Lesson picture delivery removed from live conversations on 18/10/2026; see test_voice_only')
     async def test_display_checks_user_color_and_rejects_unrelated_tool_subject(self):
         state = bridge.learning_session.LearningVisualState()
         state.observe_user("Cho xem ảnh một con mèo màu cam dạng hoạt hình")
@@ -417,6 +420,7 @@ class LearningImageToolTest(unittest.IsolatedAsyncioTestCase):
         device.send.assert_not_called()
         loader.get.assert_not_called()
 
+    @unittest.skip('Lesson picture delivery removed from live conversations on 18/10/2026; see test_voice_only')
     async def test_image_preserves_partial_audio_until_turn_end(self):
         class Gemini:
             def __init__(self): self.sent = []
@@ -450,6 +454,7 @@ class LearningImageToolTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(playback.put.call_args.args[0]), bridge.OUTPUT_SAMPLES * 2)
         playback.finish.assert_awaited_once()
 
+    @unittest.skip('Lesson picture delivery removed from live conversations on 18/10/2026; see test_voice_only')
     async def test_multiple_display_calls_require_explanation_between_images(self):
         cat_ready = asyncio.Event()
         class Loader:
@@ -503,6 +508,7 @@ class LearningImageToolTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn('error', dog_replies[1])
         self.assertNotIn('error', dog_replies[2])
 
+    @unittest.skip('Lesson picture delivery removed from live conversations on 18/10/2026; see test_voice_only')
     async def test_batch_tool_prefetches_without_display_and_reuses_on_each_show(self):
         image_ready = {word: asyncio.Event() for word in ('cat', 'dog')}
         class Loader:
@@ -562,6 +568,7 @@ class LearningImageToolTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(loader.closed)
         self.assertIn("queued", gemini.sent[0]["toolResponse"]["functionResponses"][0]["response"])
 
+    @unittest.skip('Lesson picture delivery removed from live conversations on 18/10/2026; see test_voice_only')
     async def test_missing_lesson_visual_is_shown_without_an_extra_correction_turn(self):
         class Gemini:
             def __init__(self): self.sent = []
@@ -632,6 +639,7 @@ class LearningImageToolTest(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(device.sent, [])
 
+    @unittest.skip('Lesson picture delivery removed from live conversations on 18/10/2026; see test_voice_only')
     async def test_tool_sends_png_to_robot_and_returns_teaching_instruction(self):
         class Gemini:
             def __init__(self):
@@ -705,7 +713,8 @@ class LearningImageToolTest(unittest.IsolatedAsyncioTestCase):
         await asyncio.gather(task, return_exceptions=True)
         self.assertEqual(len(gemini.sent), 1)
         prompt = gemini.sent[0]["clientContent"]["turns"][0]["parts"][0]["text"]
-        self.assertIn("playful micro-challenge", prompt)
+        self.assertIn("ask one question, then wait", prompt)
+        self.assertIn("Never call music or volume tools without a new explicit user request", prompt)
 
 
 if __name__ == "__main__":

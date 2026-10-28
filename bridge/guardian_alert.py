@@ -41,9 +41,14 @@ class GuardianAlerter:
 
     def __init__(self, recipient: str):
         self.recipient = recipient.strip()
-        self.sender = os.getenv("WISIO_ALERT_GMAIL", "").strip() or _saved_sender()
-        self.password = (os.getenv("WISIO_ALERT_APP_PASSWORD", "").strip() or
-                         _decrypt_saved_password()).replace(" ", "")
+        # A voice-only device without a parent email has no reason to decrypt
+        # a Windows secret (which can launch a slow PowerShell process).
+        self.sender = ""
+        self.password = ""
+        if self.recipient and "@" in self.recipient:
+            self.sender = os.getenv("WISIO_ALERT_GMAIL", "").strip() or _saved_sender()
+            self.password = (os.getenv("WISIO_ALERT_APP_PASSWORD", "").strip() or
+                             _decrypt_saved_password()).replace(" ", "")
         self._last_sent_at = 0.0
         self._last_fingerprint = ""
 
@@ -111,6 +116,7 @@ def _decrypt_saved_password() -> str:
         result = subprocess.run(
             ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script],
             check=True, capture_output=True, text=True, timeout=8,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
         return result.stdout.strip()
     except (OSError, subprocess.SubprocessError):

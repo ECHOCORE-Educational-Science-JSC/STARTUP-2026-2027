@@ -4,12 +4,20 @@
 #include <esp_timer.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/event_groups.h>
+#include <atomic>
+#include <mutex>
+#include <string_view>
 #include "board.h"
 
 class WifiBoard : public Board {
 protected:
     esp_timer_handle_t connect_timer_ = nullptr;
     bool in_config_mode_ = false;
+    std::mutex wifi_state_mutex_;
+    int64_t connect_deadline_us_ = 0;
+    int64_t config_request_deadline_us_ = 0;
+    bool config_task_pending_ = false;
+    std::atomic<uint32_t> wifi_config_generation_{0};
     NetworkEventCallback network_event_callback_ = nullptr;
 
     virtual const char* GetWifiSsidPrefix() const { return "Wisio"; }
@@ -36,6 +44,11 @@ protected:
      * Enter WiFi configuration mode
      */
     void StartWifiConfigMode();
+    void ArmWifiConnectTimeout();
+    void CancelWifiConnectTimeout();
+    void QueueWifiConfigMode(int64_t expected_deadline_us = 0);
+    void RunWifiConfigTransition();
+    void StartWifiSetupNotice(std::string_view sound);
 
     /**
      * WiFi connection timeout callback

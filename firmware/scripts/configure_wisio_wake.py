@@ -4,6 +4,7 @@ Run from the firmware directory in an ESP-IDF terminal after configuring the
 Freenove board. This changes configuration only; it never builds or flashes.
 """
 import json
+import argparse
 import os
 from pathlib import Path
 import shutil
@@ -14,9 +15,12 @@ from build import _wake_word_sdkconfig_options
 def main():
     import kconfiglib
 
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--build-dir', default='build', help='Configured ESP-IDF build directory')
+    args = parser.parse_args()
     root = Path(__file__).resolve().parents[1]
     os.chdir(root)
-    env_file = root / "build/config.env"
+    env_file = root / args.build_dir / "config.env"
     if not env_file.is_file() or not (root / "sdkconfig").is_file():
         raise SystemExit("Configure the Freenove ESP32-S3 project with ESP-IDF first.")
     env = json.loads(env_file.read_text(encoding="utf-8"))
@@ -49,7 +53,7 @@ def main():
     if not backup.exists():
         shutil.copy2(root / "sdkconfig", backup)
     print(kconf.write_config(str(root / "sdkconfig")))
-    print("Hey Wisio: English MultiNet6, threshold 70%; local settings preserved.")
+    print("Hey Wisio: English MultiNet5 Q8 with explicit pronunciations, threshold 40%; local settings preserved.")
     print("Build and flash the complete project, including generated_assets.bin.")
 
 

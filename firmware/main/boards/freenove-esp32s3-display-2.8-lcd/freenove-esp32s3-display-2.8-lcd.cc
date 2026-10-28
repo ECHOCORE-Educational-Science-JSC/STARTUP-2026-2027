@@ -3,9 +3,9 @@
 #include <esp_lcd_panel_vendor.h>
 
 #include <wifi_station.h>
-#include "adc_battery_monitor.h"
 #include "application.h"
 #include "assets/lang_config.h"
+#include "audio/wisio_microphone_gain.h"
 #include "button.h"
 #include "codecs/es8311_audio_codec.h"
 #include "config.h"
@@ -55,6 +55,34 @@ DECLARE_MOCHI(loving);
 DECLARE_MOCHI(angry);
 DECLARE_MOCHI(confident);
 #undef DECLARE_MOCHI
+
+class WisioAudioCodec : public Es8311AudioCodec {
+public:
+    using Es8311AudioCodec::Es8311AudioCodec;
+    bool InputData(std::vector<int16_t>& pcm) override {
+        if (!Es8311AudioCodec::InputData(pcm))
+            return false;
+        ApplyWisioMicrophoneGain(pcm);
+        return true;
+    }
+};
+
+class WisioStatusLed : public SingleLed {
+public:
+    using SingleLed::SingleLed;
+    void OnStateChanged() override {
+        auto& app = Application::GetInstance();
+        if (!app.IsChargingMode() && app.GetDeviceState() == kDeviceStateListening) {
+            SetColor(0, 12, 0);
+            TurnOn();
+        } else if (!app.IsChargingMode() && app.GetDeviceState() == kDeviceStateSpeaking) {
+            SetColor(8, 8, 0);
+            TurnOn();
+        } else {
+            SingleLed::OnStateChanged();
+        }
+    }
+};
 
 class EchoCoreLcdDisplay : public SpiLcdDisplay {
 public:
@@ -220,6 +248,22 @@ public:
 
     bool IsStartupComplete() const override { return startup_complete_.load(); }
 
+    void ShowWifiSetup(const std::string& message) override {
+        HideMusicPlayer();
+        DisplayLockGuard lock(this);
+        if (wifi_setup_panel_ == nullptr) {
+            wifi_setup_panel_ = MakeBlock(lv_screen_active(), width_, height_, 0, 0, 0x0B182B, 0);
+            wifi_setup_message_ = lv_label_create(wifi_setup_panel_);
+            lv_obj_set_width(wifi_setup_message_, width_ - 24);
+            lv_obj_set_style_text_font(wifi_setup_message_, &BUILTIN_TEXT_FONT, 0);
+            lv_obj_set_style_text_color(wifi_setup_message_, lv_color_hex(0xFFFFFF), 0);
+            lv_label_set_long_mode(wifi_setup_message_, LV_LABEL_LONG_WRAP);
+            lv_obj_center(wifi_setup_message_);
+        }
+        lv_label_set_text(wifi_setup_message_, message.c_str());
+        lv_obj_move_foreground(wifi_setup_panel_);
+    }
+
     void SetPowerSaveMode(bool on) override {
         DisplayLockGuard lock(this);
         if (power_save_.exchange(on) == on)
@@ -241,6 +285,14 @@ public:
 
     void SetStatus(const char* status) override {
         DisplayLockGuard lock(this);
+        if (wifi_setup_panel_ != nullptr &&
+            (std::strcmp(status, Lang::Strings::CHECKING_NEW_VERSION) == 0 ||
+             std::strcmp(status, Lang::Strings::LOADING_PROTOCOL) == 0 ||
+             std::strcmp(status, Lang::Strings::STANDBY) == 0)) {
+            lv_obj_delete(wifi_setup_panel_);
+            wifi_setup_panel_ = nullptr;
+            wifi_setup_message_ = nullptr;
+        }
         if (status_indicator_ != nullptr) {
             uint32_t color = kWaitingColor;
             if (std::strcmp(status, Lang::Strings::SPEAKING) == 0 ||
@@ -303,6 +355,8 @@ private:
     std::shared_ptr<EmojiCollection> mochi_faces_;
     lv_image_dsc_t loading_descriptor_ = {};
     lv_obj_t* splash_ = nullptr;
+    lv_obj_t* wifi_setup_panel_ = nullptr;
+    lv_obj_t* wifi_setup_message_ = nullptr;
     lv_obj_t* status_indicator_ = nullptr;
     lv_obj_t* sparkles_[10] = {};
     lv_obj_t* waves_[2][2] = {};
@@ -460,6 +514,10 @@ private:
     }
 
     void AnimateWaiting() {
+        if (wifi_setup_panel_ != nullptr) {
+            lv_obj_move_foreground(wifi_setup_panel_);
+            return;
+        }
         if (splash_ == nullptr) {
             if (neutral_pending_.load() &&
                 esp_timer_get_time() >= emotion_hold_until_us_.load()) {
@@ -544,36 +602,6 @@ private:
     LcdDisplay* display_ = nullptr;
     i2c_master_bus_handle_t codec_i2c_bus_;
     TouchDriver touch_;
-    AdcBatteryMonitor* adc_battery_monitor_ = nullptr;
-    std::atomic<int> charging_screen_state_{-1};
-
-    void UpdateChargingScreen(bool charging) {
-        if (display_ == nullptr || !display_->IsSetupUICalled()) {
-            return;
-        }
-        // Only a physically connected charge-status signal may suspend the robot.
-        charging = charging && adc_battery_monitor_->HasChargingStatusSignal();
-        const int state = charging ? 1 : 0;
-        if (charging_screen_state_.exchange(state) == state) {
-            return;
-        }
-        // Do not wait for an ADC capacity calculation to suspend audio/display.
-        Application::GetInstance().SetChargingMode(charging);
-    }
-
-    void InitializeBatteryMonitor() {
-        adc_battery_monitor_ = new AdcBatteryMonitor(ADC_UNIT_1, ADC_CHANNEL_8, 200000, 200000,
-                                                     BATTERY_CHARGING_GPIO, true);
-        if (!adc_battery_monitor_->HasChargingStatusSignal()) {
-            ESP_LOGW(TAG,
-                     "Automatic charging shutdown disabled: CHRG is not wired to the MCU; "
-                     "GPIO3 and battery voltage cannot determine charging");
-            return;
-        }
-        adc_battery_monitor_->OnChargingStatusChanged(
-            [this](bool charging) { UpdateChargingScreen(charging); });
-    }
-
     static void TouchTask(void* arg) {
         auto* self = static_cast<FreenoveESP32S3Display*>(arg);
         auto& app = Application::GetInstance();
@@ -591,7 +619,13 @@ private:
             }
             bool t;
             uint16_t x, y;
-            self->touch_.Read(t, x, y);
+            if (!self->touch_.Read(t, x, y)) {
+                // A failed I2C read is not a finger release or a long press.
+                down = false;
+                last_tap = 0;
+                vTaskDelay(pdMS_TO_TICKS(50));
+                continue;
+            }
 
             uint32_t now = esp_timer_get_time() / 1000;
 
@@ -734,7 +768,6 @@ public:
         InitializeI2c();
         InitializeSpi();
         InitializeLcdDisplay();
-        InitializeBatteryMonitor();
         InitializeTouch();
         InitializeButtons();
         InitializeTools();
@@ -746,15 +779,15 @@ public:
     int8_t GetWifiMaxTxPower() const override { return 52; }  // 13 dBm
 
     virtual Led* GetLed() override {
-        static SingleLed led(BUILTIN_LED_GPIO);
+        static WisioStatusLed led(BUILTIN_LED_GPIO);
         return &led;
     }
 
     virtual AudioCodec* GetAudioCodec() override {
-        static Es8311AudioCodec audio_codec(
+        static WisioAudioCodec audio_codec(
             codec_i2c_bus_, AUDIO_CODEC_I2C_NUM, AUDIO_INPUT_SAMPLE_RATE, AUDIO_OUTPUT_SAMPLE_RATE,
             AUDIO_I2S_GPIO_MCLK, AUDIO_I2S_GPIO_BCLK, AUDIO_I2S_GPIO_WS, AUDIO_I2S_GPIO_DOUT,
-            AUDIO_I2S_GPIO_DIN, AUDIO_CODEC_PA_PIN, AUDIO_CODEC_ES8311_ADDR, true, true);
+            AUDIO_I2S_GPIO_DIN, AUDIO_CODEC_PA_PIN, AUDIO_CODEC_ES8311_ADDR, true, true, 85);
         return &audio_codec;
     }
 
@@ -766,12 +799,13 @@ public:
     }
 
     virtual bool GetBatteryLevel(int& level, bool& charging, bool& discharging) override {
-        charging =
-            adc_battery_monitor_->HasChargingStatusSignal() && adc_battery_monitor_->IsCharging();
-        discharging = !charging;
-        level = adc_battery_monitor_->GetBatteryLevel();
-        UpdateChargingScreen(charging);
-        return true;
+        // This Wisio is powered continuously from USB; no battery is installed.
+        // Unsupported is deliberate: callers must not show a percentage, low
+        // battery alert, charge icon, or suspend audio/display from ADC noise.
+        level = 0;
+        charging = false;
+        discharging = false;
+        return false;
     }
 };
 

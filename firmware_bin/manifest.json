@@ -1,11 +1,17 @@
 {
   "product": "Wisio",
-  "release": "2026-10-10",
+  "release": "2026-10-28",
+  "board": "freenove-esp32s3-display-2.8-lcd",
   "chip": "esp32s3",
   "flash_size": "16MB",
-  "board": "freenove-esp32s3-display-2.8-lcd",
-  "display_rotation_degrees": 180,
-  "charging_gpio": null,
+  "psram": "8MB",
+  "toolchain": "ESP-IDF 5.5.3 / ESP-Clang 19.1.2",
+  "speech_gain": 1.0,
+  "digital_playback_reference": false,
+  "wake_during_speech": false,
+  "wake_threshold": 0.4,
+  "wake_pronunciations": 10,
+  "hardware_tested": false,
   "files": [
     {
       "file": "bootloader.bin",
@@ -28,16 +34,14 @@
     {
       "file": "wisio.bin",
       "offset": "0x20000",
-      "bytes": 3898160,
-      "sha256": "ae48cec005f79480310fc7b13e2c9acc5962ee32d6f9c43bd450f0942223d4aa"
+      "bytes": 3923664,
+      "sha256": "631beff7f9baeb25422f2cbdbfd46c249fb62c3fea00d0c9e7431cc788296954"
     },
     {
       "file": "generated_assets.bin",
       "offset": "0x800000",
-      "bytes": 5161745,
-      "sha256": "c9e582213eed98add99ba699f00ac5148ff25f03f9e112dcc02bd6f83c2defea"
+      "bytes": 3552487,
+      "sha256": "dab9f959d8fbca8d3d3db3506a509dfcab99e62e3b624d5b5e3d325a174d9eb2"
     }
-  ],
-  "firmware_version": "2.4.2",
-  "toolchain": "ESP-IDF 5.5.3 / ESP-Clang 19.1.2"
+  ]
 }

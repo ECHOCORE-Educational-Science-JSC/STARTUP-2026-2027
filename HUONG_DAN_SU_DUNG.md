@@ -1,53 +1,65 @@
-# Wisio — Robot học tiếng Anh
+# Hướng dẫn sử dụng Wisio — 28/10/2026
 
-Firmware ESP32-S3 và bridge Gemini Live chạy trên máy tính cho robot Wisio của EchoCore. Bản phân phối ngày 10/10/2026 dành cho board **Freenove ESP32-S3 Display 2.8 LCD, flash 16 MB, PSRAM 8 MB**.
+## Chuẩn bị
 
-## Cài đặt và sử dụng
+- Robot đúng board Freenove ESP32-S3 Display 2.8 LCD, flash 16 MB/PSRAM 8 MB; nguồn USB ổn định, cáp dữ liệu USB khi nạp.
+- Máy Windows có Python 3.11–3.14 và Internet. Nếu chưa có, cài từ [python.org](https://www.python.org/downloads/windows/) và bật tùy chọn thêm Python vào PATH.
+- Gemini API key riêng, tạo tại [Google AI Studio](https://aistudio.google.com/apikey). Nhập key trực tiếp trong cửa sổ bridge; không ghi vào mã nguồn hay gửi lên GitHub.
+- Robot dùng Wi-Fi 2.4 GHz. Máy tính và robot phải truy cập được nhau trong cùng mạng; mạng khách có chặn thiết bị sẽ không phù hợp.
 
-1. Giải nén toàn bộ gói, giữ nguyên cấu trúc thư mục. Cài Python 3.11–3.14 trên Windows nếu máy chưa có.
-2. Chạy `bridge/setup_bridge.cmd` để cài các thư viện. Lần cài đầu cần Internet; gói không chứa môi trường Python của người phát triển.
-3. Chạy `FLASH_FIRMWARE.cmd`, chọn đúng cổng COM và **Full Flash** khi cài bản này lần đầu. Đóng Serial Monitor trước khi nạp. Firmware đã build nằm trong `firmware_bin/`; không cần tự build để sử dụng.
-4. Chạy `START_BRIDGE.cmd`, nhập Gemini API key vào ô nhập ẩn. Giữ cửa sổ bridge mở.
-5. Kết nối robot và máy tính vào cùng mạng Wi-Fi. Robot tìm bridge qua UDP 8004. Nếu không tìm được, nhập URL được bridge in ra trong trang cấu hình Wi-Fi của robot: `http://<IP-máy-tính>:8003/wisio/ota/`.
-6. Muốn bật Google Images: đăng ký SerpApi tại https://serpapi.com/, lấy key rồi chạy `bridge/CONFIGURE_GOOGLE_IMAGES.cmd`. Chạy `bridge/CHECK_GOOGLE_IMAGES.cmd` để kiểm tra. Key được lưu riêng trên máy Windows bằng DPAPI; không gửi key cho người khác.
+## 1. Cài bridge một lần
 
-Bridge dùng HTTP 8003, WebSocket 8000 và UDP 8004. Cho phép Python qua Windows Firewall trên mạng riêng. Hai phiên bản firmware và bridge trong gói phải được dùng cùng nhau; bản này sử dụng namespace `/wisio/`.
+Giải nén toàn bộ gói vào thư mục riêng. Nhấp đúp `SETUP_BRIDGE.cmd`; chờ tới thông báo cài thành công. Nó tạo môi trường `.venv` riêng và kiểm tra Opus/FFmpeg. Không cần tự cài compiler hoặc ESP-IDF.
 
-## Các phần trong gói
+Nguồn nhạc Audius có thể dùng ngay. Để nguồn YouTube dự phòng hoạt động đầy đủ, cài Node.js 22+ hoặc Deno 2.3+ rồi mở lại bridge. Chạy `bridge/check_install.py` bằng Python trong `.venv` để xem thành phần còn thiếu. Không cần SerpApi/key tìm ảnh vì ảnh bài học đã tắt.
 
-| Thư mục/file | Nội dung |
+## 2. Nạp firmware đi kèm
+
+1. Cắm robot bằng cáp dữ liệu USB. Đóng ESP-IDF Serial Monitor và ứng dụng đang giữ cổng COM.
+2. Chạy `FLASH_FIRMWARE.cmd`, nhập cổng COM thực tế của robot. Có thể xem trong Device Manager → Ports hoặc dùng “ESP-IDF: Select Port to Use”. Không mặc định máy nào cũng là COM5.
+3. Đợi đủ năm file được ghi và xác minh; sau thông báo reset thì nạp đã xong. Script giữ NVS/Wi-Fi đã lưu, không tự mở monitor.
+
+Nạp cả app và `generated_assets.bin` đi cùng để model wake khớp firmware. Chỉ mở file `.bin` trong VS Code không phải là nạp firmware. Không cần tự build nếu dùng bộ binary có sẵn.
+
+## 3. Chạy bridge và nối robot
+
+1. Chạy `START_BRIDGE.cmd`. Nhập Gemini key khi hiện ô nhập ẩn; lúc nhập không thấy ký tự là bình thường. Giữ cửa sổ này mở trong suốt quá trình dùng.
+2. Cho phép Python qua Windows Firewall trên mạng **Private** khi Windows hỏi.
+3. Bật robot. Nếu chưa lưu mạng, robot vào cấu hình Wi-Fi; nếu kết nối thất bại khoảng 12 giây, robot tự vào cấu hình và phát lời hướng dẫn offline (cần âm lượng khác 0).
+4. Kết nối điện thoại vào điểm phát Wisio có tên hiển thị trên màn hình robot. Mở địa chỉ cấu hình mà màn hình chỉ dẫn, chọn mạng 2.4 GHz và nhập mật khẩu.
+5. Robot tự tìm bridge trong mạng. Nếu chưa tìm được, dùng URL OTA mà bridge vừa in ra, dạng `http://<IP-máy-tính>:8003/wisio/ota/`, tại mục máy chủ của trang cấu hình robot.
+6. Khi log hiện robot đã kết nối và Gemini Live đã kết nối, đợi lời giới thiệu kết thúc rồi nói chuyện.
+
+Bridge dùng TCP 8000 (WebSocket), TCP 8003 (OTA/cấu hình) và UDP 8004 (tìm trong LAN). Bản này chạy trên máy Windows; chưa tự cấu hình VPS/tên miền.
+
+## Sử dụng hằng ngày
+
+- Gọi “Hey Wisio” khi robot đang chờ. Khi nhận đúng sẽ có log “Custom wake word detected”, robot đáp lại và mở mic. **Xanh = đang nghe, vàng = đang nói**.
+- Bản khôi phục ưu tiên đường âm thanh mono như trước: tắt tăng giọng PCM và khử vọng phần mềm mới. Wake tạm khóa khi robot đang nói hoặc phát nhạc; gọi khi robot đã về chờ. Log “Wake ready”/“Wake listening” chưa chứng minh đã nhận đúng câu gọi.
+- Ví dụ: “Dạy mình về động vật bằng tiếng Anh”, “Giải thích vì sao câu này sai”, “Bật Nơi Này Có Anh của Sơn Tùng M-TP”, “Tăng âm lượng”, “Giảm âm lượng”. Robot xác nhận đổi âm lượng bằng lời, không hiện popup âm lượng.
+- Đợi robot trả lời xong khi đang tập câu dài. Khi nghe chưa rõ, robot được hướng dẫn hỏi lại. Tính chủ động có khoảng nghỉ và tôn trọng yêu cầu im lặng.
+- Nguồn USB cấp điện khi hoạt động. Firmware không hiện pin yếu, màn hình sạc hoặc tự dừng vì trạng thái sạc; điều này không thay đổi IC sạc vật lý trên board.
+
+## Cập nhật mà giữ ký ức
+
+Tắt bridge cũ bằng Ctrl+C trước khi thay mã. Khi nâng từ bản cũ, dùng cặp firmware/bridge cùng bản này; nạp lại đủ binary rồi mở lại bridge.
+
+Ký ức và hồ sơ học tập nằm ở `bridge/wisio_memory.json` trên **máy tính**, không tự chuyển sang thẻ SD 16 GB. Sao lưu file này riêng trước khi thay thư mục; không lấy file ký ức của máy người khác. Key/email bí mật là cấu hình riêng trên máy và không có trong gói GitHub. Ảnh cache cũ không được dùng trong bài học.
+
+Bản hiện tại chưa tách đầy đủ hồ sơ theo từng robot/người học trong một bridge. Nếu triển khai nhiều bé/robot, cần thiết kế tách hồ sơ trước khi dùng chung dữ liệu ký ức; không coi đây là bản máy chủ nhiều lớp học đã hoàn thiện.
+
+## Xử lý lỗi nhanh
+
+| Hiện tượng | Cách kiểm tra |
 | --- | --- |
-| `bridge/` | Bridge, prompt giáo viên, tìm ảnh, cache/prefetch, âm nhạc và các bài kiểm tra |
-| `firmware/` | Mã nguồn ESP-IDF, driver, cấu hình board và kiểm tra trên máy |
-| `firmware_bin/` | Năm binary đã build, offset nạp và SHA-256 |
-| `FLASH_FIRMWARE.cmd` | Bộ nạp firmware tương tác |
-| `START_BRIDGE.cmd` | Khởi động bridge |
-| `verify_package.py` | Kiểm tra checksum của toàn bộ gói; không nạp hoặc kết nối robot |
-| `VERIFICATION.md` | Kết quả kiểm tra và giới hạn xác nhận |
-| `THIRD_PARTY_NOTICES.md` | Nguồn gốc, giấy phép và định danh dependency cần giữ |
+| Không mở được COM / Access is denied | Đóng Serial Monitor/ứng dụng khác; chọn đúng COM sau khi rút/cắm lại. Build thành công không đồng nghĩa cổng đã sẵn sàng |
+| Chỉ có dây nguồn, không thấy COM | Thử cáp có dữ liệu và cổng USB khác |
+| Robot chưa tới bridge | Kiểm tra cùng LAN, Firewall, mạng khách, URL OTA theo IP hiện tại; không dùng IP cũ của người khác |
+| Bridge đóng ngay | Chạy lại `SETUP_BRIDGE.cmd`, kiểm tra Python 3.11–3.14; đọc thông báo cuối cửa sổ |
+| Key/quota/model lỗi | Kiểm tra tài khoản và quota của key trong AI Studio; xem mã lỗi cụ thể, không gửi key vào ảnh chụp/log |
+| Gọi wake không phản ứng | Kiểm tra đã nạp cả assets, log model `mn5q8_en`/threshold 0.40, mic không bị che và âm lượng vừa; cần thấy dòng nhận diện thật |
+| Giọng nhỏ hoặc rè | Nói tăng âm lượng; nếu rè ở mức cao thì giảm lại, kiểm tra nguồn/loa. Bản khôi phục đã tắt tăng giọng PCM, vẫn cần kiểm tra phần cứng |
+| Không phát được một bài | Nói rõ tên và ca sĩ; xem log Audius/YouTube, kiểm tra JS runtime. Một số bài bị gỡ/chặn vùng hoặc không cho stream |
+| Không có ảnh bài học | Đây là hành vi của bản voice-only; chỉ giữ bìa nhạc |
 
-## Hành vi hiện tại
-
-- Giáo viên tiếng Anh cho trẻ 6–14 tuổi, điều chỉnh bài học theo trình độ, khích lệ và sửa lỗi ngữ pháp; hồ sơ học tập lưu cục bộ ở bridge.
-- Minh họa chủ đề bằng Google Images/SerpApi; Gemini kiểm tra **pixel thực tế** trước khi hiển thị. Có cache và tìm trước ảnh. Không hiển thị kết quả chỉ vì trùng từ khóa. Mạng/quota/xác minh có thể lỗi; robot tiếp tục giải thích bằng lời khi không có ảnh phù hợp.
-- Nhạc: **Audius ưu tiên, YouTube dự phòng**. Chỉ báo sẵn sàng sau khi gửi được gói âm thanh đầu tiên; tên bài, bìa và thanh tiến trình được cập nhật cùng màn hình nhạc. Nguồn nhạc vẫn có thể giới hạn vùng hoặc ngừng cung cấp bài.
-- Màn hình ngang quay 180°. Đổi âm lượng bằng lời nói.
-- Board Freenove hiện **không có GPIO báo sạc được nối/cấu hình**. Không suy đoán “đang sạc” từ điện áp pin để tắt robot. Cắm USB-C không tự chứng minh pin đang sạc; chức năng tự dừng khi sạc cần tín hiệu phần cứng được xác định trước.
-
-Không có key, email phụ huynh, hồ sơ người học, cache ảnh hay bản ghi âm cá nhân trong gói. Chúng được tạo riêng trên máy người dùng khi cấu hình/sử dụng.
-
-## Build từ mã nguồn
-
-Bản binary đi kèm được build bằng ESP-IDF **5.5.3 / ESP-Clang 19.1.2**. Xem `firmware/AGENTS.md`, `firmware/docs/custom-board.md` và `firmware/docs/esp-idf-6-migration.md` khi build board khác. Không nạp binary Freenove vào board khác.
-
-Trong ESP-IDF Terminal, chuyển vào `firmware/`, rồi chạy:
-
-```text
-python scripts/build.py freenove-esp32s3-display-2.8-lcd --name freenove-esp32s3-display-2.8-lcd --language vi-VN --wake-word hey-wisio
-```
-
-`hey-wisio` dùng bộ nhận diện tùy biến trên ESP32-S3; chất lượng wake word cần kiểm tra trên robot thực tế. File ứng dụng sau build tên `wisio.bin`. Không đổi tên các package registry hoặc model ESP-SR; xem thông báo bên thứ ba.
-
-## Giấy phép
-
-Giữ nguyên giấy phép MIT và thông báo bản quyền của nền tảng firmware tại `LICENSE` và `firmware/LICENSE`. Các thư viện đi kèm có giấy phép riêng; xem `THIRD_PARTY_NOTICES.md` và `bridge/licenses/`.
+Khi báo lỗi cho người phát triển, gửi đoạn log từ trước đến sau lỗi, phiên bản 28/10/2026, cổng COM và trạng thái đèn. Che key, email và thông tin riêng của bé.

@@ -37,6 +37,7 @@ class PendingImages:
         pass
 
 
+@unittest.skip('Lesson picture delivery removed from live conversations on 18/10/2026; see test_voice_only')
 class SpeechImageCancellationTest(unittest.IsolatedAsyncioTestCase):
     async def test_new_physical_speech_discards_late_image_success(self):
         await self.run_device_case(new_speech=True, failure=False)

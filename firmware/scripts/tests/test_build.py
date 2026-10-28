@@ -937,11 +937,14 @@ class BuildOptionTests(unittest.TestCase):
         self.assertEqual(model, "hey_wisio")
         self.assertEqual(config["CONFIG_USE_CUSTOM_WAKE_WORD"], "y")
         self.assertEqual(config["CONFIG_USE_AFE_WAKE_WORD"], "n")
-        self.assertEqual(config["CONFIG_SR_MN_EN_MULTINET6_QUANT"], "y")
+        self.assertEqual(config["CONFIG_SR_MN_EN_MULTINET6_QUANT"], "n")
+        self.assertEqual(config["CONFIG_SR_MN_EN_MULTINET7_QUANT"], "n")
+        self.assertEqual(config["CONFIG_SR_MN_EN_MULTINET5_SINGLE_RECOGNITION_QUANT8"], "y")
         self.assertEqual(config["CONFIG_CUSTOM_WAKE_WORD"], '"HEY WISIO"')
         self.assertEqual(config["CONFIG_CUSTOM_WAKE_WORD_DISPLAY"], '"Hey Wisio"')
+        self.assertEqual(config["CONFIG_CUSTOM_WAKE_WORD_THRESHOLD"], '40')
         self.assertEqual(config["CONFIG_WAKE_WORD_DETECTION_IN_LISTENING"], "n")
-        self.assertIn("CONFIG_SR_MN_EN_MULTINET6_QUANT", symbols)
+        self.assertIn("CONFIG_SR_MN_EN_MULTINET5_SINGLE_RECOGNITION_QUANT8", symbols)
         with self.assertRaisesRegex(ValueError, "ESP32-S3"):
             build._wake_word_sdkconfig_options("hey-wisio", "esp32c6")
 

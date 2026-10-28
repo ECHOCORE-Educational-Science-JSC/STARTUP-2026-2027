@@ -125,7 +125,7 @@ class Codec:
 
 
 class Memory:
-    def prompt_context(self):
+    def prompt_context(self, **_kwargs):
         return ""
 
 
@@ -158,7 +158,7 @@ class DeviceConnectionTest(unittest.IsolatedAsyncioTestCase):
             token = ("idle", args[0])
             self.background_live.add(token)
             try:
-                return await original_idle(*args, **kwargs)
+                return await original_idle(*args, **kwargs, **getattr(self, 'proactive_options', {}))
             finally:
                 self.background_live.discard(token)
 
@@ -189,6 +189,34 @@ class DeviceConnectionTest(unittest.IsolatedAsyncioTestCase):
 
     async def ready(self, device):
         await asyncio.wait_for(device.listening.wait(), 2)
+
+    async def test_quiet_open_microphone_still_triggers_a_proactive_model_turn(self):
+        self.proactive_options = {'idle_after': .025, 'check_every': .002,
+                                  'followup_after': 1, 'reengage_after': 1}
+        device = DevicePeer()
+        self.start(device)
+        await self.ready(device)
+        # End the connection intro, then leave the real device receive loop open.
+        self.geminis[0].messages.put_nowait({'serverContent': {'interrupted': True,
+                                                              'turnComplete': True}})
+        await asyncio.wait_for(device.wait_sent(lambda m: m.get('type') == 'listen'), 1)
+        device.messages.put_nowait(json.dumps({'type': 'listen', 'state': 'start', 'mode': 'auto'}))
+        for _ in range(4):
+            device.messages.put_nowait(b'quiet microphone packet')
+        async def invitation():
+            while True:
+                for event in self.geminis[0].sent:
+                    for turn in event.get('clientContent', {}).get('turns', []):
+                        for part in turn.get('parts', []):
+                            if 'a proactive invitation after genuine quiet' in part.get('text', ''):
+                                return part['text']
+                await asyncio.sleep(.002)
+        text = await asyncio.wait_for(invitation(), 1)
+        self.assertGreaterEqual(self.session_stats[0]['listen_events'], 1)
+        self.assertEqual(self.session_stats[0]['input_frames'], 4)
+        self.assertEqual(self.session_stats[0].get('input_turns', 0), 0)
+        self.assertIn('ask one question, then wait', text)
+        self.assertTrue(self.session_stats[0]['proactive_turn'])
 
     async def test_same_uuid_reconnect_retires_old_session_and_keeps_new_usable(self):
         first, second = DevicePeer(), DevicePeer()
@@ -256,7 +284,8 @@ class DeviceConnectionTest(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(len(prompts), 1)
             self.assertIn('Chào bé', prompts[0])
             self.assertIn('phát âm', prompts[0])
-            self.assertIn('hình ảnh', prompts[0])
+            self.assertIn('chơi trò đoán từ', prompts[0])
+            self.assertNotIn('hình ảnh', prompts[0])
             self.assertIn('âm lượng', prompts[0])
             self.assertIn('không nghe rõ', prompts[0])
             self.assertGreater(len(prompts[0].split()), 80)
@@ -339,7 +368,7 @@ class DeviceConnectionTest(unittest.IsolatedAsyncioTestCase):
     async def test_intro_does_not_run_music_or_image_tools(self):
         device = DevicePeer()
         with patch.object(bridge.MusicController, 'prepare', new_callable=AsyncMock) as prepare, \
-             patch.object(bridge.learning_prefetch.LearningImagePrefetch, 'schedule') as schedule:
+             patch.object(bridge.learning_image, 'prepare_learning_image') as schedule:
             self.start(device)
             await self.ready(device)
             self.geminis[0].messages.put_nowait({'serverContent': {

@@ -40,6 +40,7 @@ class ProactiveTopicTest(unittest.TestCase):
                 self.assertIsNone(state.automatic_request())
 
 
+@unittest.skip('Lesson picture delivery removed from live conversations on 18/10/2026; see test_voice_only')
 class AutomaticImageFlowTest(unittest.IsolatedAsyncioTestCase):
     async def test_text_only_automatic_visual_reopens_listening(self):
         messages = []

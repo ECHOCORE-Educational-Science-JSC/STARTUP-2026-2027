@@ -25,6 +25,7 @@ private:
     EventGroupHandle_t event_group_handle_;
     std::unique_ptr<WebSocket> websocket_;
     int version_ = 1;
+    std::atomic<uint32_t> connection_generation_{0};
 
     void ParseServerHello(const cJSON* root);
     bool SendText(const std::string& text) override;

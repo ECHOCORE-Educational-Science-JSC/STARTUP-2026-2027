@@ -20,6 +20,14 @@ class GuardianAlertTest(unittest.TestCase):
         self.assertIsNone(guardian_alert.classify_child_safety("Bài này khó quá trời"))
         self.assertIsNone(guardian_alert.classify_child_safety("Đồ ngu"))
 
+    def test_no_recipient_never_reads_or_decrypts_saved_credentials(self):
+        with mock.patch("guardian_alert._saved_sender") as sender, \
+                mock.patch("guardian_alert._decrypt_saved_password") as secret:
+            alerter=guardian_alert.GuardianAlerter("")
+        self.assertFalse(alerter.ready)
+        sender.assert_not_called()
+        secret.assert_not_called()
+
     def test_missing_secret_never_attempts_email(self):
         with mock.patch.dict(os.environ, {}, clear=True), \
                 mock.patch("guardian_alert._saved_sender", return_value=""), \

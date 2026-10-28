@@ -17,7 +17,7 @@ class MusicMessageContractTest(unittest.TestCase):
         self.assertIn('"duration_ms"', source)
         self.assertIn("music_playback_token_", source)
 
-    def test_progress_is_validated_and_clamped_before_display(self):
+    def test_progress_is_validated_and_uses_codec_clock_before_display(self):
         source = (ROOT / "main" / "application.cc").read_text(encoding="utf-8")
         progress_block = re.search(
             r"MusicMessageState::kProgress.*?MusicMessageState::kStop",
@@ -27,7 +27,8 @@ class MusicMessageContractTest(unittest.TestCase):
         self.assertIsNotNone(progress_block)
         block = progress_block.group(0)
         self.assertIn("cJSON_IsNumber", block)
-        self.assertRegex(block, r"position_ms\s*>\s*duration_ms")
+        self.assertIn("audio_service_.MusicPlaybackPositionMs()", block)
+        self.assertNotIn("position_ms =", block)
         self.assertIn("UpdateMusicProgress", block)
 
     def test_stale_token_is_checked_on_main_task(self):

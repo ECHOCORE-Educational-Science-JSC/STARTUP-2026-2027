@@ -24,10 +24,7 @@
 #define BOOT_BUTTON_GPIO GPIO_NUM_0
 #define BUILTIN_LED_GPIO GPIO_NUM_42
 
-// FNK0104 2.8-inch schematic: TP4054 CHRG is NOT connected to the MCU.
-// GPIO3 is expansion IO, not a charge signal. Never shut down from a floating
-// pin or battery-voltage trends; a real status wire is required for this feature.
-#define BATTERY_CHARGING_GPIO GPIO_NUM_NC
+// Wisio uses external USB power only. No ADC battery or charge-status input.
 
 //屏幕显示部分
 #define DISPLAY_BACKLIGHT_PIN GPIO_NUM_45
@@ -45,9 +42,9 @@
 #define LCD_TYPE_ILI9341_SERIAL
 #define DISPLAY_WIDTH         320
 #define DISPLAY_HEIGHT        240
-// Rotate the complete landscape panel 180 degrees, keeping its 320x240 layout.
-#define DISPLAY_MIRROR_X      true
-#define DISPLAY_MIRROR_Y      true
+// Flip 180 degrees relative to the prior Wisio orientation; keep landscape 320x240.
+#define DISPLAY_MIRROR_X      false
+#define DISPLAY_MIRROR_Y      false
 #define DISPLAY_SWAP_XY       true
 #define DISPLAY_INVERT_COLOR  true
 #define DISPLAY_RGB_ORDER     LCD_RGB_ELEMENT_ORDER_BGR

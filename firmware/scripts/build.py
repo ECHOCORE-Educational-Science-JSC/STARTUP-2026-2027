@@ -360,19 +360,21 @@ def _wake_word_sdkconfig_options(
 
     if normalized == "hey_wisio":
         if target != "esp32s3":
-            raise ValueError("Hey Wisio currently requires ESP32-S3 with PSRAM and English MultiNet6")
+            raise ValueError("Hey Wisio currently requires ESP32-S3 with PSRAM and English MultiNet5 Q8")
         options.extend([
             "CONFIG_USE_CUSTOM_WAKE_WORD=y",
             "CONFIG_SR_MN_CN_NONE=y",
             "CONFIG_SR_MN_EN_NONE=n",
-            "CONFIG_SR_MN_EN_MULTINET6_QUANT=y",
+            "CONFIG_SR_MN_EN_MULTINET6_QUANT=n",
+            "CONFIG_SR_MN_EN_MULTINET7_QUANT=n",
+            "CONFIG_SR_MN_EN_MULTINET5_SINGLE_RECOGNITION_QUANT8=y",
             'CONFIG_CUSTOM_WAKE_WORD="HEY WISIO"',
             'CONFIG_CUSTOM_WAKE_WORD_DISPLAY="Hey Wisio"',
-            "CONFIG_CUSTOM_WAKE_WORD_THRESHOLD=70",
+            "CONFIG_CUSTOM_WAKE_WORD_THRESHOLD=40",
             "CONFIG_WAKE_WORD_DETECTION_IN_LISTENING=n",
             "CONFIG_SEND_WAKE_WORD_DATA=n",
         ])
-        return normalized, options, ["CONFIG_USE_CUSTOM_WAKE_WORD", "CONFIG_SR_MN_EN_MULTINET6_QUANT"]
+        return normalized, options, ["CONFIG_USE_CUSTOM_WAKE_WORD", "CONFIG_SR_MN_EN_MULTINET5_SINGLE_RECOGNITION_QUANT8"]
 
     if target not in _ESP_WAKE_WORD_TARGETS | _AFE_WAKE_WORD_TARGETS:
         raise ValueError(f"Wake-word selection is not supported for target {target}")

@@ -12,6 +12,8 @@
 #include <esp_wifi.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
+#include <memory>
+#include <new>
 #include <utility>
 
 #include <material_symbols.h>
@@ -25,7 +27,7 @@
 static const char* TAG = "WifiBoard";
 
 // Connection timeout in seconds
-static constexpr int CONNECT_TIMEOUT_SEC = 60;
+static constexpr int CONNECT_TIMEOUT_SEC = 12;
 
 WifiBoard::WifiBoard() {
     // Create connection timeout timer
@@ -33,8 +35,8 @@ WifiBoard::WifiBoard() {
                                           .arg = this,
                                           .dispatch_method = ESP_TIMER_TASK,
                                           .name = "wifi_connect_timer",
-                                          .skip_unhandled_events = true};
-    esp_timer_create(&timer_args, &connect_timer_);
+                                          .skip_unhandled_events = false};
+    ESP_ERROR_CHECK(esp_timer_create(&timer_args, &connect_timer_));
 }
 
 WifiBoard::~WifiBoard() {
@@ -112,12 +114,11 @@ void WifiBoard::TryWifiConnect() {
     if (have_ssid) {
         // Start connection attempt with timeout
         ESP_LOGI(TAG, "Starting WiFi connection attempt");
-        esp_timer_start_once(connect_timer_, CONNECT_TIMEOUT_SEC * 1000000ULL);
+        ArmWifiConnectTimeout();
         WifiManager::GetInstance().StartStation();
     } else {
         // No SSID configured, enter config mode
-        // Wait for the board version to be shown
-        vTaskDelay(pdMS_TO_TICKS(1500));
+        // Open provisioning immediately; never block startup for a version label.
         StartWifiConfigMode();
     }
 }
@@ -126,12 +127,17 @@ void WifiBoard::OnNetworkEvent(NetworkEvent event, const std::string& data) {
     switch (event) {
         case NetworkEvent::Connected:
             // Stop timeout timer
-            esp_timer_stop(connect_timer_);
+            CancelWifiConnectTimeout();
+            {
+                std::lock_guard<std::mutex> lock(wifi_state_mutex_);
+                if (in_config_mode_ && config_task_pending_)
+                    return;
+                in_config_mode_ = false;
+            }
 #ifdef CONFIG_USE_ESP_BLUFI_WIFI_PROVISIONING
             // make sure blufi resources has been released
             Blufi::GetInstance().deinit();
 #endif
-            in_config_mode_ = false;
             ESP_LOGI(TAG, "Connected to WiFi: %s", data.c_str());
             break;
         case NetworkEvent::Scanning:
@@ -142,16 +148,29 @@ void WifiBoard::OnNetworkEvent(NetworkEvent event, const std::string& data) {
             break;
         case NetworkEvent::Disconnected:
             ESP_LOGW(TAG, "WiFi disconnected");
+            ArmWifiConnectTimeout();
             break;
         case NetworkEvent::WifiConfigModeEnter:
+            wifi_config_generation_.fetch_add(1);
             ESP_LOGI(TAG, "WiFi config mode entered");
-            in_config_mode_ = true;
+            CancelWifiConnectTimeout();
+            {
+                std::lock_guard<std::mutex> lock(wifi_state_mutex_);
+                in_config_mode_ = true;
+            }
             break;
         case NetworkEvent::WifiConfigModeExit:
+            wifi_config_generation_.fetch_add(1);
             ESP_LOGI(TAG, "WiFi config mode exited");
-            in_config_mode_ = false;
-            // Try to connect with the new credentials
-            TryWifiConnect();
+            {
+                std::lock_guard<std::mutex> lock(wifi_state_mutex_);
+                in_config_mode_ = false;
+            }
+            // Avoid re-entering WifiManager during its mode transition.
+            Application::GetInstance().Schedule([this]() {
+                Application::GetInstance().GetAudioService().ResetDecoder();
+                TryWifiConnect();
+            });
             break;
         default:
             break;
@@ -167,84 +186,186 @@ void WifiBoard::SetNetworkEventCallback(NetworkEventCallback callback) {
     network_event_callback_ = std::move(callback);
 }
 
-void WifiBoard::OnWifiConnectTimeout(void* arg) {
-    auto* board = static_cast<WifiBoard*>(arg);
-    ESP_LOGW(TAG, "WiFi connection timeout, entering config mode");
-
-    WifiManager::GetInstance().StopStation();
-    board->StartWifiConfigMode();
+void WifiBoard::ArmWifiConnectTimeout() {
+    std::lock_guard<std::mutex> lock(wifi_state_mutex_);
+    if (in_config_mode_ || config_task_pending_ || connect_deadline_us_ != 0)
+        return;
+    connect_deadline_us_ = esp_timer_get_time() + CONNECT_TIMEOUT_SEC * 1000000LL;
+    esp_timer_stop(connect_timer_);
+    const auto err = esp_timer_start_once(connect_timer_, CONNECT_TIMEOUT_SEC * 1000000ULL);
+    if (err != ESP_OK) {
+        connect_deadline_us_ = 0;
+        ESP_LOGE(TAG, "Cannot arm WiFi deadline: %s", esp_err_to_name(err));
+    }
 }
 
-void WifiBoard::StartWifiConfigMode() {
-    in_config_mode_ = true;
-    // Transition to wifi configuring state
-    Application::GetInstance().SetDeviceState(kDeviceStateWifiConfiguring);
-#ifdef CONFIG_USE_HOTSPOT_WIFI_PROVISIONING
+void WifiBoard::CancelWifiConnectTimeout() {
+    std::lock_guard<std::mutex> lock(wifi_state_mutex_);
+    connect_deadline_us_ = 0;
+    esp_timer_stop(connect_timer_);
+}
+
+void WifiBoard::OnWifiConnectTimeout(void* arg) {
+    auto* board = static_cast<WifiBoard*>(arg);
+    int64_t deadline;
+    {
+        std::lock_guard<std::mutex> lock(board->wifi_state_mutex_);
+        deadline = board->connect_deadline_us_;
+        if (deadline == 0 || esp_timer_get_time() < deadline)
+            return;
+    }
+    // No blocking Wi-Fi stop, event-handler teardown, or UI on the timer task.
+    board->QueueWifiConfigMode(deadline);
+}
+
+void WifiBoard::StartWifiConfigMode() { QueueWifiConfigMode(); }
+
+void WifiBoard::QueueWifiConfigMode(int64_t expected_deadline_us) {
+    {
+        std::lock_guard<std::mutex> lock(wifi_state_mutex_);
+        if (in_config_mode_ || config_task_pending_)
+            return;
+        if (expected_deadline_us != 0 && (connect_deadline_us_ != expected_deadline_us ||
+                                          esp_timer_get_time() < expected_deadline_us))
+            return;
+        config_request_deadline_us_ = expected_deadline_us;
+        config_task_pending_ = true;
+    }
+    if (xTaskCreate(
+            [](void* arg) {
+                static_cast<WifiBoard*>(arg)->RunWifiConfigTransition();
+                vTaskDelete(nullptr);
+            },
+            "wifi_config", 4096, this, 2, nullptr) != pdPASS) {
+        std::lock_guard<std::mutex> lock(wifi_state_mutex_);
+        config_task_pending_ = false;
+        ESP_LOGE(TAG, "Cannot create WiFi provisioning task; retrying");
+        if (connect_deadline_us_ == 0)
+            connect_deadline_us_ = esp_timer_get_time();
+        esp_timer_stop(connect_timer_);
+        esp_timer_start_once(connect_timer_, 1000000);
+    }
+}
+
+void WifiBoard::RunWifiConfigTransition() {
     auto& wifi_manager = WifiManager::GetInstance();
-
+    int64_t deadline;
+    {
+        std::lock_guard<std::mutex> lock(wifi_state_mutex_);
+        deadline = config_request_deadline_us_;
+    }
+    // Never tear down the network underneath an in-progress firmware write.
+    const auto state = Application::GetInstance().GetDeviceState();
+    if (state == kDeviceStateUpgrading || state == kDeviceStateFatalError) {
+        std::lock_guard<std::mutex> lock(wifi_state_mutex_);
+        config_task_pending_ = false;
+        if (state == kDeviceStateUpgrading && connect_deadline_us_ != 0)
+            esp_timer_start_once(connect_timer_, 1000000);
+        return;
+    }
+    // Manager methods take their own lock; never call them while holding ours.
+    const bool connected = wifi_manager.IsConnected();
+    {
+        std::lock_guard<std::mutex> lock(wifi_state_mutex_);
+        if (deadline != 0 &&
+            (connected || connect_deadline_us_ != deadline || esp_timer_get_time() < deadline)) {
+            config_task_pending_ = false;
+            return;
+        }
+        in_config_mode_ = true;
+        connect_deadline_us_ = 0;
+        esp_timer_stop(connect_timer_);
+    }
+    ESP_LOGW(TAG, "Opening WiFi setup%s", deadline ? " after 12s without a connection" : "");
+    Application::GetInstance().Schedule([this, deadline]() {
+        auto& app = Application::GetInstance();
+        const auto state = app.GetDeviceState();
+        // Live conversation states return through idle before provisioning.
+        if (state == kDeviceStateConnecting || state == kDeviceStateListening ||
+            state == kDeviceStateSpeaking || state == kDeviceStateNotifying) {
+            app.SetDeviceState(kDeviceStateIdle);
+        }
+        app.ResetProtocol();
+        app.SetDeviceState(kDeviceStateWifiConfiguring);
+        GetDisplay()->ShowWifiSetup(
+            deadline ? "Không kết nối được Wi-Fi.\nĐang mở trang cấu hình..."
+                     : "Đang mở cấu hình Wi-Fi...\nDùng điện thoại để kết nối Wisio.");
+    });
+    wifi_manager.StopStation();
+#ifdef CONFIG_USE_HOTSPOT_WIFI_PROVISIONING
     wifi_manager.StartConfigAp();
-
-    // Show config prompt after a short delay
-    Application::GetInstance().Schedule([&wifi_manager]() {
-        std::string hint = Lang::Strings::CONNECT_TO_HOTSPOT;
-        hint += wifi_manager.GetApSsid();
-        hint += Lang::Strings::ACCESS_VIA_BROWSER;
-        hint += wifi_manager.GetApWebUrl();
-
-        Application::GetInstance().Alert(Lang::Strings::WIFI_CONFIG_MODE, hint.c_str(), "gear",
-                                         Lang::Sounds::OGG_WIFICONFIG);
+    Application::GetInstance().Schedule([this, deadline]() {
+        auto& wifi = WifiManager::GetInstance();
+        if (!wifi.IsConfigMode())
+            return;
+        std::string hint = deadline ? "Không kết nối được Wi-Fi.\n" : "Cấu hình Wi-Fi cho Wisio\n";
+        hint += "Trên điện thoại, kết nối:\n" + wifi.GetApSsid();
+        hint += "\nMở: " + wifi.GetApWebUrl();
+        hint += "\nNhập tên mạng và mật mã.";
+        // Play the bundled offline provisioning announcement exactly once.
+        auto& app = Application::GetInstance();
+        auto sound = Lang::Sounds::OGG_WIFICONFIG;
+#if CONFIG_LANGUAGE_VI_VN
+        if (deadline != 0)
+            sound = Lang::Sounds::OGG_WIFICONFIG_FAILED;
+#endif
+        app.Alert(Lang::Strings::WIFI_CONFIG_MODE, hint.c_str(), "gear", {});
+        GetDisplay()->ShowWifiSetup(hint);
+        // ResetProtocol's scheduled cleanup precedes this job. Long speech
+        // feeds a bounded audio queue on a worker, never on the UI/main task.
+        app.Schedule([this, sound]() { StartWifiSetupNotice(sound); });
     });
 #elif CONFIG_USE_ESP_BLUFI_WIFI_PROVISIONING
-    auto& blufi = Blufi::GetInstance();
-    // initialize esp-blufi protocol
-    blufi.init();
+    Blufi::GetInstance().init();
+    Application::GetInstance().Schedule([]() {
+        Application::GetInstance().Alert(Lang::Strings::WIFI_CONFIG_MODE,
+                                         Lang::Strings::ENTERING_WIFI_CONFIG_MODE, "gear",
+                                         Lang::Sounds::OGG_WIFICONFIG);
+    });
 #endif
+    bool connect_requested;
+    {
+        std::lock_guard<std::mutex> lock(wifi_state_mutex_);
+        config_task_pending_ = false;
+        connect_requested = !in_config_mode_;
+    }
+    if (connect_requested)
+        Application::GetInstance().Schedule([this]() { TryWifiConnect(); });
+}
+
+void WifiBoard::StartWifiSetupNotice(std::string_view sound) {
+    auto& app = Application::GetInstance();
+    if (!IsInWifiConfigMode() || app.GetDeviceState() != kDeviceStateWifiConfiguring)
+        return;
+    struct Notice {
+        WifiBoard* board;
+        std::string_view sound;
+        uint32_t generation;
+    };
+    auto* notice = new (std::nothrow) Notice{this, sound, wifi_config_generation_.load()};
+    if (!notice)
+        return;  // The visual instructions are already visible.
+    if (xTaskCreate(
+            [](void* arg) {
+                std::unique_ptr<Notice> owned(static_cast<Notice*>(arg));
+                auto& app = Application::GetInstance();
+                app.GetAudioService().PlaySound(owned->sound, [&]() {
+                    return owned->board->wifi_config_generation_.load() == owned->generation &&
+                           !app.IsChargingMode();
+                });
+                owned.reset();
+                vTaskDelete(nullptr);
+            },
+            "wifi_notice", 4096, notice, 2, nullptr) != pdPASS) {
+        delete notice;
+        ESP_LOGE(TAG, "WiFi speech unavailable; setup instructions remain visible");
+    }
 }
 
 void WifiBoard::EnterWifiConfigMode() {
-    ESP_LOGI(TAG, "EnterWifiConfigMode called");
-    GetDisplay()->ShowNotification(Lang::Strings::ENTERING_WIFI_CONFIG_MODE);
-
-    auto& app = Application::GetInstance();
-    auto state = app.GetDeviceState();
-
-    if (state == kDeviceStateSpeaking || state == kDeviceStateNotifying ||
-        state == kDeviceStateListening || state == kDeviceStateIdle) {
-        // Reset protocol (close audio channel, reset protocol)
-        Application::GetInstance().ResetProtocol();
-
-        xTaskCreate(
-            [](void* arg) {
-                auto* board = static_cast<WifiBoard*>(arg);
-
-                // Wait for 1 second to allow speaking to finish gracefully
-                vTaskDelay(pdMS_TO_TICKS(1000));
-
-                // Stop any ongoing connection attempt
-                esp_timer_stop(board->connect_timer_);
-                WifiManager::GetInstance().StopStation();
-
-                // Enter config mode
-                board->StartWifiConfigMode();
-
-                vTaskDelete(NULL);
-            },
-            "wifi_cfg_delay", 4096, this, 2, NULL);
+    const auto state = Application::GetInstance().GetDeviceState();
+    if (state == kDeviceStateUpgrading || state == kDeviceStateFatalError)
         return;
-    }
-
-    if (state != kDeviceStateStarting) {
-        ESP_LOGE(TAG,
-                 "EnterWifiConfigMode called but device state is not starting or speaking, device "
-                 "state: %d",
-                 state);
-        return;
-    }
-
-    // Stop any ongoing connection attempt
-    esp_timer_stop(connect_timer_);
-    WifiManager::GetInstance().StopStation();
-
     StartWifiConfigMode();
 }
 

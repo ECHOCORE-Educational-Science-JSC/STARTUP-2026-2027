@@ -1199,6 +1199,7 @@ void LcdDisplay::ShowMusicPlayerLocked(const std::string& title, const std::stri
 
         // Full-width 3px progress line spanning the top edge of the bottom panel
         music_progress_bar_ = lv_bar_create(music_bottom_panel_);
+        lv_obj_remove_style_all(music_progress_bar_);
         lv_obj_set_size(music_progress_bar_, LV_HOR_RES, 3);
         lv_obj_align(music_progress_bar_, LV_ALIGN_TOP_MID, 0, 0);
         lv_bar_set_range(music_progress_bar_, 0, 1000);
@@ -1317,7 +1318,8 @@ void LcdDisplay::UpdateMusicProgress(uint32_t position_ms, uint32_t duration_ms)
         duration_ms > 0
             ? static_cast<int32_t>((static_cast<uint64_t>(position_ms) * 1000) / duration_ms)
             : 0;
-    lv_bar_set_value(music_progress_bar_, value, LV_ANIM_ON);
+    // Time is sampled from codec writes. No tween from a previous update/track.
+    lv_bar_set_value(music_progress_bar_, value, LV_ANIM_OFF);
     char position[16];
     char total[16];
     FormatMusicTime(position_ms, position, sizeof(position));

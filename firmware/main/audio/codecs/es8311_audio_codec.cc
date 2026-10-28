@@ -3,12 +3,16 @@
 #include <esp_log.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
+#include <algorithm>
+#include <limits>
 
 #define TAG "Es8311AudioCodec"
 
-Es8311AudioCodec::Es8311AudioCodec(void* i2c_master_handle, i2c_port_t i2c_port, int input_sample_rate, int output_sample_rate,
-    gpio_num_t mclk, gpio_num_t bclk, gpio_num_t ws, gpio_num_t dout, gpio_num_t din,
-    gpio_num_t pa_pin, uint8_t es8311_addr, bool use_mclk, bool pa_inverted) {
+Es8311AudioCodec::Es8311AudioCodec(void* i2c_master_handle, i2c_port_t i2c_port,
+                                   int input_sample_rate, int output_sample_rate, gpio_num_t mclk,
+                                   gpio_num_t bclk, gpio_num_t ws, gpio_num_t dout, gpio_num_t din,
+                                   gpio_num_t pa_pin, uint8_t es8311_addr, bool use_mclk,
+                                   bool pa_inverted, int output_volume_limit) {
     duplex_ = true; // 是否双工
     input_reference_ = false; // 是否使用参考输入，实现回声消除
     input_channels_ = 1; // 输入通道数
@@ -16,6 +20,7 @@ Es8311AudioCodec::Es8311AudioCodec(void* i2c_master_handle, i2c_port_t i2c_port,
     output_sample_rate_ = output_sample_rate;
     pa_pin_ = pa_pin;
     pa_inverted_ = pa_inverted;
+    output_volume_limit_ = std::clamp(output_volume_limit, 0, 100);
     input_gain_ = 42.0f;
 
     assert(input_sample_rate_ == output_sample_rate_);
@@ -100,7 +105,8 @@ void Es8311AudioCodec::UpdateDeviceState() {
         };
         ESP_ERROR_CHECK(esp_codec_dev_open(dev_, &fs));
         ESP_ERROR_CHECK(esp_codec_dev_set_in_gain(dev_, input_gain_));
-        ESP_ERROR_CHECK(esp_codec_dev_set_out_vol(dev_, output_volume_));
+        ESP_ERROR_CHECK(
+            esp_codec_dev_set_out_vol(dev_, output_volume_ * output_volume_limit_ / 100));
     } else if (!input_enabled_ && !output_enabled_ && dev_ != nullptr) {
         ESP_ERROR_CHECK(esp_codec_dev_close(dev_));
         esp_codec_dev_delete(dev_);
@@ -172,8 +178,13 @@ void Es8311AudioCodec::CreateDuplexChannels(gpio_num_t mclk, gpio_num_t bclk, gp
 
 void Es8311AudioCodec::SetOutputVolume(int volume) {
     std::lock_guard<std::mutex> lock(data_if_mutex_);
+    volume = std::clamp(volume, 0, 100);
     if (dev_ != nullptr) {
-        ESP_ERROR_CHECK(esp_codec_dev_set_out_vol(dev_, volume));
+        const auto ret = esp_codec_dev_set_out_vol(dev_, volume * output_volume_limit_ / 100);
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to set output volume: %d", ret);
+            return;
+        }
     }
     AudioCodec::SetOutputVolume(volume);
 }
@@ -212,15 +223,26 @@ void Es8311AudioCodec::EnableOutput(bool enable) {
 }
 
 int Es8311AudioCodec::Read(int16_t* dest, int samples) {
-    if (input_enabled_) {
-        ESP_ERROR_CHECK_WITHOUT_ABORT(esp_codec_dev_read(dev_, (void*)dest, samples * sizeof(int16_t)));
+    if (!input_enabled_ || !dev_ || !dest || samples <= 0 ||
+        samples > std::numeric_limits<int>::max() / static_cast<int>(sizeof(int16_t)))
+        return 0;
+    const auto ret = esp_codec_dev_read(dev_, dest, samples * sizeof(int16_t));
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Audio capture failed: %d", ret);
+        return 0;
     }
     return samples;
 }
 
 int Es8311AudioCodec::Write(const int16_t* data, int samples) {
-    if (output_enabled_) {
-        ESP_ERROR_CHECK_WITHOUT_ABORT(esp_codec_dev_write(dev_, (void*)data, samples * sizeof(int16_t)));
+    if (!output_enabled_ || !dev_ || !data || samples <= 0 ||
+        samples > std::numeric_limits<int>::max() / static_cast<int>(sizeof(int16_t)))
+        return 0;
+    const auto ret =
+        esp_codec_dev_write(dev_, const_cast<int16_t*>(data), samples * sizeof(int16_t));
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Audio playback failed: %d", ret);
+        return 0;
     }
     return samples;
 }

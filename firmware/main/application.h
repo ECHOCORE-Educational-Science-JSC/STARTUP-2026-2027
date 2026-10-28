@@ -159,6 +159,7 @@ private:
     bool music_playback_ =
         false;  // Bridge music ignores wake words; physical controls still abort it.
     std::string music_playback_token_;
+    uint32_t music_duration_ms_ = 0;
     int music_idle_seconds_ = 0;
     int clock_ticks_ = 0;
     std::atomic<bool> charging_mode_{false};

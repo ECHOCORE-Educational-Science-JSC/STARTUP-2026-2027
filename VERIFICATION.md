@@ -1,13 +1,14 @@
-# Kiểm tra bản Wisio 10/10/2026
+# Kiểm tra bản 28/10/2026
 
-- Bridge: **374 tests, OK**, 76.934 giây. Bao gồm prompt/endpoint Wisio, tìm và xác minh ảnh, hủy/prefetch/cache, âm thanh, kết nối và nguồn nhạc Audius/YouTube.
-- Firmware: **95 host tests, OK**, 24.468 giây. Các định danh cấu hình Wisio và tương thích cấu hình cũ đã được kiểm tra.
-- Bộ build container: **10 tests, OK**, 1.708 giây; đường dẫn artifact dùng `wisio.bin`.
-- Smoke test từ thư mục đóng gói: **29 tests, OK**, 9.313 giây; công cụ kiểm tra cài đặt tải được Opus trong gói. Các dependency Python/FFmpeg dùng môi trường kiểm tra hiện có, được cài riêng bằng `setup_bridge.cmd` khi người dùng cài gói.
-- Script nạp: **1 test, OK**; không tự mở lại monitor sau khi nạp.
-- Firmware Freenove: build bằng ESP-IDF 5.5.3 / ESP-Clang 19.1.2. Tên project trong app description là `wisio`. Binary đã qua kiểm tra kích thước phân vùng; offset/SHA-256 ghi tại `firmware_bin/manifest.json`.
-- Nội dung gói và năm binary được kiểm tra SHA-256 bằng `verify_package.py`; ZIP được mở lại và kiểm tra CRC sau khi tạo.
-- Giữ nguyên MIT copyright, giấy phép Opus và định danh registry/model bên thứ ba. Không đổi lịch sử Git.
-- Không đóng gói key, file DPAPI secret, email cấu hình, `wisio_memory.json`, môi trường `.venv`, bản ghi âm, log hay cache cá nhân.
+- Freenove ESP32-S3, ESP-IDF 5.5.3/ESP-Clang 19.1.2: build thành công, app 0x3bded0 byte; phân vùng app 0x3f0000 byte.
+- Bản khôi phục âm thanh: tắt tăng giọng PCM và khử vọng phần mềm mới trên Freenove; quay lại mono, khóa wake khi nói/nhạc.
+- Đợt trước có 126 test firmware qua; 50 test bridge/hội thoại/wake qua; 39 test nhạc qua. Ba test DSP/wake có log riêng, đã nằm trong bộ firmware, không cộng lặp.
+- Test wake qua WebSocket giả lập, ngắt câu đang phát và ngắt lúc hàng đợi drain. Không dùng Gemini API thật trong các test này.
+- Assets đã đối chiếu: mn5q8_en, threshold 0.40, 10 cách phát âm. Binary có SHA-256 và offset trong firmware_bin/manifest.json.
+- Gói sử dụng được kiểm checksum, ZIP CRC, import dependency, Opus/FFmpeg và đối chiếu với binary đã build. Không chứa key, ký ức, bản ghi âm hoặc môi trường Python riêng.
 
-Đây là xác nhận kiểm tra trên máy và build. Chưa nạp bản đổi tên này lên robot trong lượt làm việc này; chưa xác nhận màn hình, loa, wake word hoặc sạc trên phần cứng thực tế. Các test có mô phỏng không thay thế kiểm tra robot.
+Chưa nạp hoặc thử mic/loa trên robot thật trong lượt phát hành này. Bản mới đã bị người dùng báo rè/ngắt; bản khôi phục này cần nghe lại trên robot thật, chưa tuyên bố đã hết lỗi; chưa khẳng định nhận wake chính xác 100%. Các board khác không được build lại trong lượt này. Kết quả IDF 6 cũ trong tài liệu kỹ thuật không phải kết quả bản vá này.
+
+## Kiểm tra bản khôi phục âm thanh
+
+Build mới thành công: app 0x3bded0 byte. Lượt host chạy 127 test: 126 qua, một test compiler timeout; chép lại đúng test đó cùng hai test mic/đường loa chạy riêng thì cả 3 qua. Test mới đối chiếu class codec thực: mono 1 kênh, không playback reference, hệ số giọng 1.0 và PCM loa không bị biến đổi. Không coi lần chạy timeout là một lượt full-suite sạch. Bridge không đổi so với nguồn đã chạy 91 test ở bước chuẩn bị đăng. Cần người dùng nạp lại và nghe trên thiết bị để xác nhận hết rè/ngắt.

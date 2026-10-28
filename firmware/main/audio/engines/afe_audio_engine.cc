@@ -76,14 +76,8 @@ bool AfeAudioEngine::Initialize(AudioCodec* codec, int frame_duration_ms, srmode
     if (multinet_model_name != nullptr) {
         wake_detector_ = WakeDetector::kMultiNet;
         custom_wake_word_ = std::make_unique<CustomWakeWord>();
-        custom_wake_word_->OnWakeWordDetected([this](const std::string& wake_word) {
-            last_detected_wake_word_ = wake_word;
-            xEventGroupClearBits(event_group_, kWakeWordEnabled);
-            UpdateActiveState();
-            if (wake_word_detected_callback_) {
-                wake_word_detected_callback_(wake_word);
-            }
-        });
+        custom_wake_word_->OnWakeWordDetected(
+            [this](const std::string& wake_word) { NotifyWakeWordDetected(wake_word); });
         if (!custom_wake_word_->Initialize(codec_, models_)) {
             ESP_LOGE(TAG, "Failed to initialize MultiNet wake-word detector");
             custom_wake_word_.reset();
@@ -405,11 +399,18 @@ void AfeAudioEngine::HandleWakeWordResult(const afe_fetch_result_t* result) {
         return;
     }
 
-    last_detected_wake_word_ = wake_words_[model_index];
+    NotifyWakeWordDetected(wake_words_[model_index]);
+}
+
+void AfeAudioEngine::NotifyWakeWordDetected(const std::string& wake_word) {
+    last_detected_wake_word_ = wake_word;
     xEventGroupClearBits(event_group_, kWakeWordEnabled);
-    // UpdateActiveState marks the AFE controls dirty; the next loop iteration
-    // of ProcessingTask disables WakeNet via ApplyAfeControls.
-    UpdateActiveState();
+    // This runs in ProcessingTask, which must continue draining AFE fetch.
+    // UpdateActiveState acquires the feed mutex: a producer can be holding it
+    // while waiting for fetch to free ring-buffer space. Taking it here would
+    // stop the wake notification from ever reaching the application.
+    // The application applies the full active state when it handles the event.
+    afe_control_dirty_ = true;
     if (wake_word_detected_callback_) {
         wake_word_detected_callback_(last_detected_wake_word_);
     }

@@ -28,13 +28,14 @@ class AudioCodec {
 public:
     AudioCodec();
     virtual ~AudioCodec();
-    
+
+    virtual int speech_gain_q15() const { return 32768; }
     virtual void SetOutputVolume(int volume);
     virtual void SetInputGain(float gain);
     virtual void EnableInput(bool enable);
     virtual void EnableOutput(bool enable);
 
-    virtual void OutputData(std::vector<int16_t>& data);
+    virtual bool OutputData(std::vector<int16_t>& data);
     virtual bool InputData(std::vector<int16_t>& data);
     virtual void Start();
 

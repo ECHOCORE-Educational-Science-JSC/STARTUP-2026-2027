@@ -22,8 +22,9 @@
 #include "audio_codec.h"
 #include "audio_debugger.h"
 #include "audio_engine.h"
-#include "protocol.h"
+#include "music_playback_clock.h"
 #include "ogg_demuxer.h"
+#include "protocol.h"
 
 /*
  * There are two types of audio data flow:
@@ -98,6 +99,7 @@ struct AudioTask {
     uint32_t timestamp = 0;
     uint32_t playback_id = 0;
     uint32_t media_position_ms = 0;
+    uint32_t music_epoch = 0;
 };
 
 struct DebugStatistics {
@@ -135,11 +137,15 @@ public:
 
     void SetCallbacks(AudioServiceCallbacks& callbacks);
 
-    bool PushPacketToDecodeQueue(std::unique_ptr<AudioStreamPacket> packet, bool wait = false);
+    bool PushPacketToDecodeQueue(std::unique_ptr<AudioStreamPacket> packet, bool wait = false,
+                                 const std::function<bool()>& accept_packet = {});
     std::unique_ptr<AudioStreamPacket> PopPacketFromSendQueue();
-    void PlaySound(const std::string_view& sound);
+    void PlaySound(const std::string_view& sound, std::function<bool()> keep_playing = {});
     bool ReadAudioData(std::vector<int16_t>& data, int sample_rate, int samples);
     void ResetDecoder();
+    void StartMusicPlaybackClock();
+    void StopMusicPlaybackClock();
+    uint32_t MusicPlaybackPositionMs();
     void SetModelsList(srmodel_list_t* models_list);
 
 private:
@@ -150,6 +156,7 @@ private:
     void* opus_encoder_ = nullptr;
     void* opus_decoder_ = nullptr;
     std::mutex decoder_mutex_;
+    std::mutex output_power_mutex_;
     std::mutex input_resampler_mutex_;
     esp_ae_rate_cvt_handle_t input_resampler_ = nullptr;
     esp_ae_rate_cvt_handle_t output_resampler_ = nullptr;
@@ -173,6 +180,7 @@ private:
     TaskHandle_t audio_output_task_handle_ = nullptr;
     TaskHandle_t opus_codec_task_handle_ = nullptr;
     std::mutex audio_queue_mutex_;
+    MusicPlaybackClock music_clock_;
     std::condition_variable audio_queue_cv_;
     std::deque<std::unique_ptr<AudioStreamPacket>> audio_decode_queue_;
     std::deque<std::unique_ptr<AudioStreamPacket>> audio_send_queue_;
@@ -198,15 +206,16 @@ private:
     std::atomic<bool> audio_input_need_warmup_{false};
 
     esp_timer_handle_t audio_power_timer_ = nullptr;
-    std::chrono::steady_clock::time_point last_input_time_;
-    std::chrono::steady_clock::time_point last_output_time_;
+    std::atomic<uint32_t> last_input_time_ms_{0};
+    std::atomic<uint32_t> last_output_time_ms_{0};
 
     void AudioInputTask();
     void AudioOutputTask();
     void OpusCodecTask();
     void PushTaskToEncodeQueue(AudioTaskType type, std::vector<int16_t>&& pcm);
     bool InitializeAudioEngine();
-    void SetDecodeSampleRate(int sample_rate, int frame_duration);
+    bool SetDecodeSampleRate(int sample_rate, int frame_duration);
+    bool ConvertOutputFrame(std::vector<int16_t>& pcm);
     void CheckAndUpdateAudioPowerState();
     bool IsPlaybackDrainedLocked() const;
     bool MarkPlaybackDrainedLocked();

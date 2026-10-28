@@ -13,3 +13,4 @@
 *.zip -text
 # Preserve the supplied font license verbatim, including its whitespace.
 firmware/main/display/charging_font.LICENSE -whitespace
+licenses/charging_font.LICENSE -whitespace

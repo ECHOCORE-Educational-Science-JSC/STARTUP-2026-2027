@@ -8,6 +8,7 @@ import bridge
 from test_image_audio import InactiveMusic, verified_visual
 
 
+@unittest.skip('Lesson picture delivery removed from live conversations on 18/10/2026; see test_voice_only')
 class ImageRequestBoundaryTest(unittest.IsolatedAsyncioTestCase):
     async def test_new_transcript_in_tool_event_replaces_previous_subject_first(self):
         state = bridge.learning_session.LearningVisualState()

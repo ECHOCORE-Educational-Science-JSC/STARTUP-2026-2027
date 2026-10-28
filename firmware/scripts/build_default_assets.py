@@ -274,6 +274,28 @@ def process_extra_files(extra_files_dir, assets_dir):
     return extra_files_list
 
 
+def custom_wake_commands(config, model_names):
+    command = config['wake_word']
+    common = {'text': config['display'], 'action': 'wake'}
+    if any(name in model_names for name in ('mn7_en', 'mn5q8_en')) and command.strip().upper() == 'HEY WISIO':
+        # ESP-SR multinet_g2p.py alphabet: HH=h, EY=d, W=W, IY=m,
+        # IH=g, Z=Z, S=S, OW=b. A coined name needs explicit pronunciation;
+        # English G2P can otherwise guess it or spell its letters as an acronym.
+        return [dict(common, command=label, phonemes=phonemes) for label, phonemes in (
+            ('hey wisio', 'hd WmZmb'),       # hey wee-zee-oh
+            ('hey wiz ee oh', 'hd WgZmb'),  # hey wiz-ee-oh
+            ('hey wis ee oh', 'hd WgSmb'),  # hey wiss-ee-oh
+            ('hey wee see oh', 'hd WmSmb'), # hey wee-see-oh
+            ('hey vee zee oh', 'hd VmZmb'), # Vietnamese v/English w variation
+            ('hey vee see oh', 'hd VmSmb'),
+            ('hay wee see yo', 'hd WmSYb'),
+            ('heh wee see oh', 'hf WmSmb'),
+            ('heh wee zee oh', 'hf WmZmb'),
+            ('hay wee see aw', 'hd WmSme'),
+        )]
+    return [dict(common, command=command)]
+
+
 def generate_index_json(assets_dir, srmodels, text_font, emoji_collection, extra_files=None,
                         multinet_model_info=None, font_bundle_id=None):
     """Generate index.json file"""
@@ -900,13 +922,7 @@ def main():
             "language": language,
             "duration": 3000,  # Default duration in ms
             "threshold": custom_wake_word_config['threshold'],
-            "commands": [
-                {
-                    "command": custom_wake_word_config['wake_word'],
-                    "text": custom_wake_word_config['display'],
-                    "action": "wake"
-                }
-            ]
+            "commands": custom_wake_commands(custom_wake_word_config, multinet_model_names)
         }
         print(f"  custom wake word: {custom_wake_word_config['wake_word']} ({custom_wake_word_config['display']})")
         print(f"  wake word language: {language}")

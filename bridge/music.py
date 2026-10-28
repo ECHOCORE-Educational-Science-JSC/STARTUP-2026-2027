@@ -510,6 +510,10 @@ def _ffmpeg_executable(explicit: str | None = None) -> str:
         raise MusicError("Thiếu bộ giải mã âm thanh đi kèm bridge.") from exc
 
 
+MUSIC_AUDIO_FILTER = ("aresample=24000:out_chlayout=mono:rematrix_maxval=1,"
+                      "highpass=f=100,alimiter=limit=0.75:level=0:latency=1")
+
+
 async def pcm_frames(track: Track, frame_bytes: int = 1920,
                      ffmpeg: str | None = None):
     """Decode a resolved stream to 24 kHz mono PCM without saving the song."""
@@ -522,7 +526,10 @@ async def pcm_frames(track: Track, frame_bytes: int = 1920,
     if track.http_headers:
         headers = "".join(f"{key}: {value}\r\n" for key, value in track.http_headers.items())
         args.extend(["-headers", headers])
-    args.extend(["-i", track.stream_url, "-vn", "-f", "s16le",
+    # Downmix before limiting so stereo summing cannot clip after the limiter.
+    # Remove deep bass the small speaker cannot reproduce; preserve headroom.
+    # Disable limiter auto-level, which would otherwise undo peak attenuation.
+    args.extend(["-i", track.stream_url, "-vn", "-af", MUSIC_AUDIO_FILTER, "-f", "s16le",
                  "-ac", "1", "-ar", "24000", "pipe:1"])
     # Popen + to_thread works reliably on Windows even when the active asyncio
     # event loop cannot create overlapped subprocess pipes.

@@ -25,7 +25,7 @@ Existing copyright notices in source and component overrides are retained. Histo
 - ESP-IDF, ESP-SR and Espressif components: see their individual licenses fetched by ESP-IDF Component Manager. `firmware/main/idf_component.yml` and `firmware/dependencies.lock` record dependency identifiers/versions.
 - Wi-Fi portal component override: license and notices remain in `firmware/main/overrides/esp-wifi-connect/`.
 - Opus: the included `bridge/bin/opus.dll` is accompanied by `bridge/licenses/OPUS-COPYING.txt`.
-- Charging-screen font: the supplied license is preserved in `firmware/main/display/charging_font.LICENSE`.
+- Charging-screen font: the supplied license is preserved in `licenses/charging_font.LICENSE` (also in the firmware source).
 - Python dependencies (websockets, Pillow, imageio-ffmpeg, pyserial, esptool, yt-dlp and their dependencies) are installed by `bridge/setup_bridge.cmd` from `bridge/requirements.txt`. Their own distributions include their licenses; the package does not bundle a developer virtual environment or FFmpeg executable.
 - Image/music provider results remain the property of their respective rights holders. Search/stream availability is not a transfer of content ownership.
 

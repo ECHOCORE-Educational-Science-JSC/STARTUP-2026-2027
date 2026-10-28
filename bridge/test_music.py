@@ -113,14 +113,12 @@ class MusicVoiceTest(unittest.IsolatedAsyncioTestCase):
         visual.turn_query = "bee"
         visual.visual_required = True
         visual.correction_sent = True
-        with patch.object(bridge, "deliver_learning_image") as deliver:
-            await bridge.gemini_output(
-                Gemini(), Device(), None, Codec(), "session", 1,
-                {"gemini_content_seen": False, "output_frames": 0},
-                bridge.new_speech_state(), one_turn=True, music_controller=Music(),
-                learning_visual_state=visual,
-            )
-        deliver.assert_not_called()
+        await bridge.gemini_output(
+            Gemini(), Device(), None, Codec(), "session", 1,
+            {"gemini_content_seen": False, "output_frames": 0},
+            bridge.new_speech_state(), one_turn=True, music_controller=Music(),
+            learning_visual_state=visual,
+        )
         self.assertIsNone(visual.turn_word)
 
     async def test_silent_tool_turn_requests_confirmation_before_music_starts(self):
